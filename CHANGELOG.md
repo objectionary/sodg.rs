@@ -2,13 +2,13 @@
 
 ## [0.0.2] - 2025-09-23
 
-### Changed
+### Changed (0.0.2)
 
 - Formatted the changelog to comply with markdownlint requirements.
 
 ## [0.0.1] - 2025-09-23
 
-### Changed
+### Changed (0.0.1)
 
 - Prevented padding zero bytes when promoting short `Hex::Bytes`
   concatenations to `Vec` storage so that previously stored payload is
@@ -22,3 +22,4 @@
 ### Maintenance
 
 - Bumped the crate version to `0.0.1` to publish the concatenation fix.
+
