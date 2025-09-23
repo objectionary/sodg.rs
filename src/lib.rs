@@ -20,7 +20,7 @@
 //! sodg.bind(0, 1, Label::from_str("foo").unwrap());
 //! ```
 
-#![doc(html_root_url = "https://docs.rs/sodg/0.0.0")]
+#![doc(html_root_url = "https://docs.rs/sodg/0.0.1")]
 #![deny(warnings)]
 #![warn(clippy::all, clippy::pedantic, clippy::nursery, clippy::cargo)]
 #![allow(clippy::multiple_inherent_impl)]
