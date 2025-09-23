@@ -22,4 +22,3 @@
 ### Maintenance
 
 - Bumped the crate version to `0.0.1` to publish the concatenation fix.
-
