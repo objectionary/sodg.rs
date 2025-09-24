@@ -164,4 +164,3 @@ fn init() {
         .init()
         .unwrap();
 }
-
