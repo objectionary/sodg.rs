@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2022-2025 Objectionary.com
 // SPDX-License-Identifier: MIT
 
-use std::fmt::{self, Debug, Display, Formatter};
+use std::fmt::{self, Debug, Display, Formatter, Write as _};
 use std::str::FromStr;
 
 use anyhow::bail;
@@ -46,10 +46,16 @@ impl Display for Label {
 impl Debug for Label {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         match *self {
-            Self::Greek(c) => f.write_str(c.to_string().as_str()),
-            Self::Alpha(i) => f.write_str(format!("α{i}").as_str()),
+            Self::Greek(c) => f.write_char(c),
+            Self::Alpha(i) => {
+                f.write_char('α')?;
+                Display::fmt(&i, f)
+            }
             Self::Str(a) => {
-                f.write_str(a.iter().filter(|c| **c != ' ').collect::<String>().as_str())
+                for c in a.iter().copied().filter(|c| *c != ' ') {
+                    f.write_char(c)?;
+                }
+                Ok(())
             }
         }
     }
