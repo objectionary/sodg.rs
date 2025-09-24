@@ -1,21 +1,27 @@
-# SPDX-FileCopyrightText: Copyright (c) 2022-2025 Objectionary.com
+# SPDX-FileCopyrightText: 2022-2025 Objectionary.com
 # SPDX-License-Identifier: MIT
----
-# yamllint disable rule:line-length
 name: cargo-deny
-'on':
+on:
   push:
-    branches:
-      - master
+    branches: [ master ]
   pull_request:
-    branches:
-      - master
+    branches: [ master ]
+
+permissions:
+  contents: read
+
 jobs:
   cargo-deny:
-    timeout-minutes: 15
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v5
-      - uses: EmbarkStudios/cargo-deny-action@v2
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: cargo-deny
+        uses: EmbarkStudios/cargo-deny-action@v2
         with:
           command: check
+          log-level: warn
