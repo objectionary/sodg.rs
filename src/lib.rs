@@ -34,6 +34,7 @@ mod clone;
 mod ctors;
 mod debug;
 mod dot;
+mod find;
 mod hex;
 mod inspect;
 mod label;
