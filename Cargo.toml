@@ -3,7 +3,7 @@
 
 [package]
 name = "sodg"
-version = "0.0.2"
+version = "0.0.1"
 edition = "2024"
 repository = "https://github.com/objectionary/sodg"
 description = "Surging Object DiGraph (SODG)"
