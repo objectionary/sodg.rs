@@ -56,17 +56,15 @@ impl<const N: usize> Sodg<N> {
         Ok(())
     }
 
-    /// Merge two trees recursively, ignoring the nodes already `mapped`.
+    /// Merge two trees recursively, ignoring nodes already in `mapped`.
     ///
-    /// The `right` vertex is mapped to the `left` vertex. The decisions about
-    /// their kids are made recursively.
+    /// `right` vertex (from `g`) is mapped onto `left` vertex (in `self`).
+    /// Children decisions are made recursively.
     ///
-    /// The `mapped` is a key-value map, where the key is a vertex from the right
-    /// graph, which is mapped to a vertex from the left graph.
+    /// `mapped`: key is a vertex from the right graph, value is the mapped vertex in the left graph.
     ///
     /// # Errors
-    ///
-    /// If it's impossible to merge, an error will be returned.
+    /// Returns an error if merge is impossible (e.g., missing vertex).
     #[allow(clippy::option_if_let_else)]
     fn merge_rec(
         &mut self,
@@ -75,35 +73,57 @@ impl<const N: usize> Sodg<N> {
         right: usize,
         mapped: &mut HashMap<usize, usize>,
     ) -> Result<()> {
+        // If already mapped, nothing to do
         if mapped.contains_key(&right) {
             return Ok(());
         }
+
+        // Record mapping early to avoid cycles re-entering here
         mapped.insert(right, left);
-        if g.vertices.get(right).unwrap().persistence != Persistence::Empty {
-            self.put(left, &g.vertices.get(right).unwrap().data);
+
+        // Access vertex safely
+        let v = g
+            .vertices
+            .get(right)
+            .ok_or(MergeError::MissingVertex { id: right })?;
+
+        // Merge payload if present
+        if v.persistence != Persistence::Empty {
+            // put: merges data from right into left
+            self.put(left, &v.data);
         }
+
+        // First pass: ensure all children exist and recurse
         for (a, to) in g.kids(right) {
+            // `self.kid` returns Option<usize> for child by attribute `a`
             let matched = if let Some(t) = self.kid(left, *a) {
                 t
-            } else if let Some(t) = mapped.get(to) {
-                self.bind(left, *t, *a);
-                *t
+            } else if let Some(&t) = mapped.get(to) {
+                // Child already mapped elsewhere; bind current edge to that node
+                self.bind(left, t, *a);
+                t
             } else {
+                // Create new node, bind, and continue
                 let id = self.next_id();
                 self.add(id);
                 self.bind(left, id, *a);
                 id
             };
+
+            // Recurse into the matched/created child
             self.merge_rec(g, matched, *to, mapped)?;
         }
+
+        // Second pass: if multiple paths led to different nodes, join them
         for (a, to) in g.kids(right) {
             if let Some(first) = self.kid(left, *a)
-                && let Some(second) = mapped.get(to)
-                && first != *second
+                && let Some(&second) = mapped.get(to)
+                && first != second
             {
-                self.join(first, *second);
+                self.join(first, second);
             }
         }
+
         Ok(())
     }
 
