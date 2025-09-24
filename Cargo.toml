@@ -19,7 +19,7 @@ gc = []
 [dependencies]
 anyhow = "1.0.98"
 bincode = { version = "2.0.1", features = ["serde"] }
-ctor = "0.4.2"
+ctor = "0.5.0"
 emap = { version = "0.0.13", features = ["serde"] }
 hex = "0.4.3"
 itertools = "0.14.0"
