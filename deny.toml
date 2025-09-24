@@ -1,0 +1,45 @@
+# SPDX-FileCopyrightText: Copyright (c) 2022-2025 Objectionary.com
+# SPDX-License-Identifier: MIT
+
+[graph]
+all-features = true
+
+[output]
+feature-depth = 1
+
+[advisories]
+ignore = []
+git-fetch-with-cli = true
+
+[licenses]
+confidence-threshold = 0.92
+allow = [
+  "MIT",
+  "Apache-2.0",
+  "MPL-2.0",
+  "Unicode-DFS-2016",
+  "Unicode-3.0",
+  "Zlib",
+  "Unlicense"
+]
+unused-allowed-license = "allow"
+exceptions = []
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+allow = []
+deny = []
+skip = []
+skip-tree = []
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
+
+[sources.allow-org]
+github = []
+gitlab = []
+bitbucket = []

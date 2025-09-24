@@ -925,7 +925,7 @@ checksum = "7a2ae44ef20feb57a68b23d846850f861394c2e02dc425a50098ae8c90267589"
 
 [[package]]
 name = "sodg"
-version = "0.0.0"
+version = "0.0.1"
 dependencies = [
  "anyhow",
  "bincode",
