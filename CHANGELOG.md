@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.0.3] - 2025-09-23
+
+### Fixed (0.0.3)
+
+- Treated `Label::from_str("α")` as `Label::Greek('α')` to avoid parsing an empty
+  suffix while preserving existing `αN` parsing.
+
+### Added (0.0.3)
+
+- Introduced a regression test ensuring the bare alpha label maps to the Greek
+  variant.
+
 ## [0.0.2] - 2025-09-23
 
 ### Changed (0.0.2)
