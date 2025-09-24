@@ -1,27 +1,31 @@
 # SPDX-FileCopyrightText: 2022-2025 Objectionary.com
 # SPDX-License-Identifier: MIT
 name: cargo-deny
-on:
-  push:
-    branches: [ master ]
-  pull_request:
-    branches: [ master ]
-
-permissions:
-  contents: read
-
+on: [push, pull_request]
 jobs:
   cargo-deny:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
+      - uses: actions/checkout@v5
 
-      - name: cargo-deny
-        uses: EmbarkStudios/cargo-deny-action@v2
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
         with:
-          command: check
-          log-level: warn
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Install cargo-deny
+        run: cargo install --locked cargo-deny@0.18.0
+
+      - name: Run cargo-deny
+        run: cargo deny check --all-features
+
