@@ -13,8 +13,9 @@
 //!
 //! ```
 //! use std::str::FromStr as _;
+//!
 //! use sodg::{Label, Sodg};
-//! let mut sodg : Sodg<16> = Sodg::empty(256);
+//! let mut sodg: Sodg<16> = Sodg::empty(256);
 //! sodg.add(0);
 //! sodg.add(1);
 //! sodg.bind(0, 1, Label::from_str("foo").unwrap());
@@ -110,7 +111,7 @@ pub struct Script {
 ///
 /// ```
 /// use sodg::{Label, Sodg};
-/// let mut sodg : Sodg<16> = Sodg::empty(256);
+/// let mut sodg: Sodg<16> = Sodg::empty(256);
 /// sodg.add(0);
 /// sodg.add(1);
 /// sodg.bind(0, 1, Label::Alpha(0));
@@ -127,7 +128,8 @@ pub struct Sodg<const N: usize> {
     stores: emap::Map<usize>,
     branches: emap::Map<microstack::Stack<usize, MAX_BRANCH_SIZE>>,
     vertices: emap::Map<Vertex<N>>,
-    /// This is the next ID of a vertex to be returned by the [`Sodg::next_v`] function.
+    /// This is the next ID of a vertex to be returned by the [`Sodg::next_v`]
+    /// function.
     #[serde(skip_serializing, skip_deserializing)]
     next_v: usize,
 }
