@@ -97,12 +97,11 @@ impl<const N: usize> Sodg<N> {
             self.merge_rec(g, matched, *to, mapped)?;
         }
         for (a, to) in g.kids(right) {
-            if let Some(first) = self.kid(left, *a) {
-                if let Some(second) = mapped.get(to) {
-                    if first != *second {
-                        self.join(first, *second);
-                    }
-                }
+            if let Some(first) = self.kid(left, *a)
+                && let Some(&second) = mapped.get(to)
+                && first != second
+            {
+                self.join(first, second);
             }
         }
         Ok(())

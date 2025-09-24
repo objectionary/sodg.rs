@@ -29,33 +29,30 @@ impl<const N: usize> Sodg<N> {
     fn inspect_v(&self, v: usize, seen: &mut HashSet<usize>) -> Result<Vec<String>> {
         seen.insert(v);
         let mut lines = vec![];
-        self.vertices
-            .get(v)
-            .with_context(|| format!("Can't find ν{v}"))?
-            .edges
-            .iter()
-            .sorted()
-            .for_each(|e| {
-                let skip = seen.contains(e.1);
-                let line = format!(
-                    "  .{} ➞ ν{}{}",
-                    e.0,
-                    e.1,
-                    if skip {
-                        "…".to_owned()
-                    } else {
-                        String::new()
-                    },
-                );
-                lines.push(line);
-                if !skip {
-                    seen.insert(*e.1);
-                    self.inspect_v(*e.1, seen)
-                        .unwrap()
-                        .iter()
-                        .for_each(|t| lines.push(format!("  {t}")));
-                }
-            });
+        let edges = {
+            let vertex = self
+                .vertices
+                .get(v)
+                .with_context(|| format!("Can't find ν{v}"))?;
+            vertex
+                .edges
+                .iter()
+                .sorted()
+                .map(|(label, target)| (*label, *target))
+                .collect::<Vec<_>>()
+        };
+        for (label, target) in edges {
+            let skip = seen.contains(&target);
+            let suffix = if skip { "…" } else { "" };
+            lines.push(format!("  .{label} ➞ ν{target}{suffix}"));
+            if skip {
+                continue;
+            }
+            let inspected = self.inspect_v(target, seen)?;
+            for nested in inspected {
+                lines.push(format!("  {nested}"));
+            }
+        }
         Ok(lines)
     }
 }
@@ -75,5 +72,16 @@ mod tests {
         let txt = g.inspect(0).unwrap();
         g.bind(0, 1, Label::Alpha(0));
         assert_ne!(String::new(), txt);
+    }
+
+    #[test]
+    fn inspect_errors_if_child_vertex_missing() {
+        let mut g: Sodg<16> = Sodg::empty(256);
+        g.add(0);
+        g.add(1);
+        g.bind(0, 1, Label::Alpha(0));
+        g.vertices.remove(1);
+        let result = g.inspect(0);
+        assert!(result.is_err());
     }
 }
