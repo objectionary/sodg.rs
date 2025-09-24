@@ -476,7 +476,7 @@ impl Hex {
                     Self::Bytes(bytes, l + h.len())
                 } else {
                     let mut v = Vec::new();
-                    v.extend_from_slice(b);
+                    v.extend_from_slice(&b[..*l]);
                     v.extend_from_slice(h.bytes());
                     Self::Vector(v)
                 }
@@ -804,6 +804,19 @@ mod tests {
     }
 
     #[test]
+    fn concatenates_bytes_with_long_vector_without_padding() {
+        let bytes = Hex::from_slice(&[0xAB, 0xCD]);
+        let vector = Hex::from_vec((1..=16).map(|value| value as u8).collect());
+        let result = bytes.concat(&vector);
+        let mut expected = Vec::with_capacity(bytes.len() + vector.len());
+        expected.extend_from_slice(bytes.bytes());
+        expected.extend_from_slice(vector.bytes());
+        assert_eq!(result.len(), expected.len());
+        assert_eq!(result.bytes()[2], 0x01);
+        assert_eq!(result.bytes(), expected.as_slice());
+    }
+
+    #[test]
     fn creates_from_big_slice() {
         let s: [u8; 9] = [0xAB, 0xD8, 0xAB, 0xD8, 0xAB, 0xD8, 0xAB, 0xD8, 0xAB];
         let mut accum = vec![];
@@ -823,7 +836,7 @@ mod tests {
         let b = Hex::from_slice(b"as_bytesss");
         let c = Hex::from_vec(vec![0x12, 0xAD]);
         let res = a.concat(&b).concat(&c);
-        assert_eq!(20, res.len());
+        assert_eq!(a.len() + b.len() + c.len(), res.len());
     }
 
     #[test]
