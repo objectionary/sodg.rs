@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.0.4] - 2025-09-23
+
+### Fixed (0.0.4)
+
+- Added contextual information to missing-vertex merge failures so callers
+  receive actionable diagnostics instead of opaque errors.
+
+### Added (0.0.4)
+
+- Introduced a regression test to cover the missing-vertex branch of the merge
+  logic and guarantee the contextual error remains wired.
+
 ## [0.0.3] - 2025-09-23
 
 ### Fixed (0.0.3)

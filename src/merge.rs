@@ -3,7 +3,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use log::debug;
 
 use crate::{Label, Persistence, Sodg};
@@ -85,7 +85,7 @@ impl<const N: usize> Sodg<N> {
         let v = g
             .vertices
             .get(right)
-            .ok_or(MergeError::MissingVertex { id: right })?;
+            .with_context(|| format!("Can't find ν{right}"))?;
 
         // Merge payload if present
         if v.persistence != Persistence::Empty {
@@ -187,6 +187,19 @@ mod tests {
         assert!(r.is_err());
         let msg = r.err().unwrap().to_string();
         assert!(msg.contains("ν2, ν13, ν42"), "{}", msg);
+    }
+
+    #[test]
+    fn reports_missing_vertex() {
+        let mut g: Sodg<16> = Sodg::empty(256);
+        g.add(0);
+        let mut extra = Sodg::empty(2);
+        let missing = 1;
+        extra.vertices.remove(missing);
+        let error = g.merge(&extra, 0, missing).unwrap_err();
+        let message = error.to_string();
+        let expected = format!("Can't find ν{missing}");
+        assert!(message.contains(&expected), "{message}");
     }
 
     #[test]
