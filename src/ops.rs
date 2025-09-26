@@ -9,7 +9,7 @@ use std::borrow::Cow;
 use std::convert::TryFrom as _;
 use std::str::FromStr as _;
 
-use crate::{BRANCH_NONE, BRANCH_STATIC, Edge, LabelId, Persistence, Sodg, Vertex};
+use crate::{BRANCH_NONE, BRANCH_STATIC, Edge, EdgeIndex, LabelId, Persistence, Sodg, Vertex};
 use crate::{Hex, Label, LabelInterner};
 
 impl<const N: usize> Vertex<N> {
@@ -96,6 +96,76 @@ impl<const N: usize> Sodg<N> {
                 .index
                 .insert(label_id, Self::encode_vertex_id(destination));
         }
+    }
+
+    fn collect_branch_members(&mut self, branch: usize) -> Vec<usize> {
+        let Some(members) = self.branches.get_mut(branch) else {
+            return Vec::new();
+        };
+        let mut collected = Vec::with_capacity(members.len());
+        collected.extend(members.iter().copied());
+        members.clear();
+        collected.sort_unstable();
+        collected.dedup();
+        collected
+    }
+
+    fn edges_pointing_to(&self, targets: &[usize]) -> Vec<(usize, Vec<(LabelId, usize)>)> {
+        if targets.is_empty() {
+            return Vec::new();
+        }
+        let mut removals = Vec::new();
+        for (source, vertex) in self.vertices.iter() {
+            let mut edges = Vec::new();
+            for edge in &vertex.edges {
+                if targets.contains(&edge.to) {
+                    edges.push((edge.label_id, edge.to));
+                }
+            }
+            if !edges.is_empty() {
+                removals.push((source, edges));
+            }
+        }
+        removals
+    }
+
+    fn remove_edges(&mut self, removals: &[(usize, Vec<(LabelId, usize)>)]) {
+        for (source, edges) in removals {
+            if let Some(vertex) = self.vertices.get_mut(*source) {
+                for (label_id, _) in edges {
+                    vertex.remove_edge(*label_id);
+                }
+            }
+        }
+    }
+
+    fn reset_vertices(&mut self, vertices: &[usize]) {
+        for vertex_id in vertices {
+            if let Some(vertex) = self.vertices.get_mut(*vertex_id) {
+                vertex.edges.clear();
+                vertex.index = EdgeIndex::new();
+                vertex.branch = BRANCH_NONE;
+                vertex.persistence = Persistence::Empty;
+                vertex.data = Hex::empty();
+            }
+        }
+    }
+
+    fn cleanup_branch(&mut self, branch: usize) -> Vec<usize> {
+        let members = self.collect_branch_members(branch);
+        if members.is_empty() {
+            if let Some(stored) = self.stores.get_mut(branch) {
+                *stored = 0;
+            }
+            return members;
+        }
+        let removals = self.edges_pointing_to(&members);
+        self.remove_edges(&removals);
+        self.reset_vertices(&members);
+        if let Some(stored) = self.stores.get_mut(branch) {
+            *stored = 0;
+        }
+        members
     }
 }
 
@@ -248,43 +318,68 @@ impl<const N: usize> Sodg<N> {
     /// If vertex `v1` is absent, it will panic.
     #[inline]
     pub fn data(&mut self, v: usize) -> Option<Hex> {
-        let vtx = self.vertices.get_mut(v).unwrap();
-        match vtx.persistence {
-            Persistence::Stored => {
-                let d = vtx.data.clone();
-                vtx.persistence = Persistence::Taken;
-                let branch = vtx.branch;
-                let s = self.stores.get_mut(branch).unwrap();
-                *s -= 1;
-                if *s == 0 {
-                    let members = self.branches.get_mut(branch).unwrap();
-                    for v in members.into_iter() {
-                        self.vertices.get_mut(v).unwrap().branch = BRANCH_NONE;
-                    }
-                    #[cfg(debug_assertions)]
-                    trace!(
-                        "#data: branch no.{} destroyed {} vertices as garbage: {}",
-                        branch,
-                        members.len(),
-                        members
-                            .into_iter()
-                            .map(|v| format!("ν{v}"))
-                            .collect::<Vec<String>>()
-                            .join(", ")
-                    );
-                    members.clear();
-                }
-                #[cfg(debug_assertions)]
-                trace!("#data: data of ν{v} retrieved");
-                Some(d)
-            }
-            Persistence::Taken => {
-                #[cfg(debug_assertions)]
-                trace!("#data: data of ν{v} retrieved again");
-                Some(vtx.data.clone())
-            }
-            Persistence::Empty => None,
+        enum Retrieval {
+            Fresh,
+            Repeat,
         }
+
+        let mut cleanup_branch = None;
+        let mut retrieved = None;
+        let mut result = None;
+        {
+            let vertex = self.vertices.get_mut(v).unwrap();
+            match vertex.persistence {
+                Persistence::Stored => {
+                    debug_assert!(
+                        vertex.branch != BRANCH_NONE,
+                        "Vertex ν{v} is marked for storage but has no branch",
+                    );
+                    let data = vertex.data.clone();
+                    vertex.persistence = Persistence::Taken;
+                    let branch = vertex.branch;
+                    if let Some(stored) = self.stores.get_mut(branch) {
+                        debug_assert!(*stored > 0, "Branch {branch} store counter underflow");
+                        *stored -= 1;
+                        if *stored == 0 {
+                            cleanup_branch = Some(branch);
+                        }
+                    } else {
+                        cleanup_branch = Some(branch);
+                    }
+                    result = Some(data);
+                    retrieved = Some(Retrieval::Fresh);
+                }
+                Persistence::Taken => {
+                    result = Some(vertex.data.clone());
+                    retrieved = Some(Retrieval::Repeat);
+                }
+                Persistence::Empty => {}
+            }
+        }
+        let cleaned = cleanup_branch.map(|branch| (branch, self.cleanup_branch(branch)));
+        if let Some((branch, removed)) = cleaned
+            && !removed.is_empty()
+        {
+            #[cfg(debug_assertions)]
+            trace!(
+                "#data: branch no.{} destroyed {} vertices as garbage: {}",
+                branch,
+                removed.len(),
+                removed
+                    .iter()
+                    .map(|vertex| format!("ν{vertex}"))
+                    .collect::<Vec<String>>()
+                    .join(", "),
+            );
+        }
+        if let Some(retrieval) = retrieved {
+            #[cfg(debug_assertions)]
+            match retrieval {
+                Retrieval::Fresh => trace!("#data: data of ν{v} retrieved"),
+                Retrieval::Repeat => trace!("#data: data of ν{v} retrieved again"),
+            }
+        }
+        result
     }
 
     /// Find all kids of a vertex.
@@ -517,6 +612,34 @@ mod tests {
         assert_eq!(3, g.branches.get(2).unwrap().len());
         g.data(2);
         assert_eq!(0, g.len());
+    }
+
+    #[test]
+    fn garbage_collection_cleans_vertices_and_edges() {
+        let mut g: Sodg<16> = Sodg::empty(256);
+        g.add(0);
+        g.add(1);
+        g.add(2);
+        g.bind(0, 1, Label::Alpha(0));
+        g.bind(1, 2, Label::Alpha(1));
+        g.put(2, &Hex::from_str_bytes("payload"));
+
+        assert!(g.kid(0, Label::Alpha(0)).is_some());
+        assert!(g.kid(1, Label::Alpha(1)).is_some());
+
+        g.data(2);
+
+        assert!(g.kid(0, Label::Alpha(0)).is_none());
+        assert!(g.kid(1, Label::Alpha(1)).is_none());
+        assert_eq!(BRANCH_NONE, g.vertices.get(0).unwrap().branch);
+        assert_eq!(BRANCH_NONE, g.vertices.get(1).unwrap().branch);
+        assert_eq!(BRANCH_NONE, g.vertices.get(2).unwrap().branch);
+        assert!(g.vertices.get(0).unwrap().edges.is_empty());
+        assert!(g.vertices.get(1).unwrap().edges.is_empty());
+        assert!(g.vertices.get(2).unwrap().edges.is_empty());
+        assert!(g.vertices.get(0).unwrap().persistence == Persistence::Empty);
+        assert!(g.vertices.get(1).unwrap().persistence == Persistence::Empty);
+        assert!(g.vertices.get(2).unwrap().persistence == Persistence::Empty);
     }
 
     #[test]
