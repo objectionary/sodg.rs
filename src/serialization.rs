@@ -11,6 +11,19 @@ use log::trace;
 use crate::Sodg;
 
 impl<const N: usize> Sodg<N> {
+    fn rebuild_edge_indexes(&mut self) {
+        let vertex_ids: Vec<usize> = self
+            .vertices
+            .iter()
+            .map(|(vertex_id, _)| vertex_id)
+            .collect();
+        for vertex_id in vertex_ids {
+            if let Some(vertex) = self.vertices.get_mut(vertex_id) {
+                vertex.rebuild_index();
+            }
+        }
+    }
+
     /// Save the entire [`Sodg`] into a binary file.
     ///
     /// The entire [`Sodg`] can be restored from the file.
@@ -47,9 +60,10 @@ impl<const N: usize> Sodg<N> {
         let bytes =
             fs::read(path).with_context(|| format!("Can't read from {}", path.display()))?;
         let size = bytes.len();
-        let sodg: Self = bincode::serde::decode_from_slice(&bytes, bincode::config::legacy())
+        let mut sodg: Self = bincode::serde::decode_from_slice(&bytes, bincode::config::legacy())
             .with_context(|| format!("Can't deserialize from {}", path.display()))?
             .0;
+        sodg.rebuild_edge_indexes();
         trace!(
             "Deserialized {} vertices ({} bytes) from {} in {:?}",
             sodg.len(),
@@ -87,10 +101,17 @@ mod tests {
         let mut g: Sodg<1> = Sodg::empty(100);
         g.add(0);
         g.put(0, &Hex::from_str_bytes("hello"));
+        g.add(1);
+        let label = Label::from_str("foo").unwrap();
+        g.bind(0, 1, label.clone());
         let tmp = TempDir::new().unwrap();
         let file = tmp.path().join("foo.sodg");
         g.save(file.as_path()).unwrap();
         let after: Sodg<1> = Sodg::load(file.as_path()).unwrap();
         assert_eq!(g.inspect(0).unwrap(), after.inspect(0).unwrap());
+        assert_eq!(Some(1), after.kid(0, label.clone()));
+        let (loaded_label, destination) = after.kids(0).next().unwrap();
+        assert_eq!(&label, loaded_label);
+        assert_eq!(1, *destination);
     }
 }
