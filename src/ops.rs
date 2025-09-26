@@ -496,6 +496,28 @@ impl<const N: usize> Sodg<N> {
 
 /// Iterator returned by [`Sodg::kids`] that yields outbound edges and their destinations.
 /// Borrowed view over an outbound edge returned by [`Sodg::kids`].
+///
+/// # Invariants
+///
+/// * `label_id` matches the canonical UTF-8 representation of [`label`](Self::label)
+///   in the owning [`LabelInterner`].
+/// * `destination` always references an existing vertex identifier at the moment
+///   the iterator yields the value.
+///
+/// # Examples
+///
+/// ```
+/// use std::str::FromStr as _;
+/// use sodg::{Label, Sodg};
+///
+/// let mut graph: Sodg<16> = Sodg::empty(16);
+/// graph.add(0);
+/// graph.add(1);
+/// graph.bind(0, 1, Label::from_str("foo").unwrap());
+/// let kid = graph.kids(0).next().unwrap();
+/// assert_eq!("foo", kid.label().to_string());
+/// assert_eq!(1, kid.destination());
+/// ```
 #[derive(Clone, Copy, Debug)]
 pub struct KidRef<'a> {
     label_id: LabelId,
@@ -529,6 +551,11 @@ impl<'a> KidRef<'a> {
     }
 }
 
+/// Owning iterator that powers [`Sodg::kids`].
+///
+/// The iterator keeps the original [`Edge`] collection and the shared
+/// [`LabelInterner`] reference in sync while yielding lightweight [`KidRef`]
+/// projections.
 struct Kids<'a> {
     interner: &'a LabelInterner,
     inner: std::slice::Iter<'a, Edge>,

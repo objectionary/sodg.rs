@@ -8,6 +8,22 @@
 //! it's time to delete some vertices (something similar to
 //! "garbage collection").
 //!
+//! Behind the API the crate combines three performance-oriented
+//! building blocks:
+//!
+//! * Labels are interned via [`LabelInterner`], which canonicalizes each
+//!   [`Label`] into its UTF-8 representation so that high-level code keeps the
+//!   typed enum while the engine manipulates compact numeric identifiers.
+//! * Outbound edges are tracked by [`EdgeIndex`], a hybrid structure that
+//!   starts with a small, fixed-capacity map and seamlessly upgrades to a
+//!   hash map once the vertex degree grows past [`edge_index::SMALL_THRESHOLD`].
+//!   This avoids the cost of hashing in the common case but keeps large graphs
+//!   responsive.
+//! * [`Hex`] payloads use a dual representation: stack-allocated arrays serve
+//!   short blobs, while larger data is shared through reference-counted slices.
+//!   Graph traversals therefore copy as little as possible while still offering
+//!   cheap cloning semantics for read-heavy workloads.
+//!
 //! For example, here is how you create a simple
 //! di-graph with two vertices and an edge between them:
 //!

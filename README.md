@@ -19,12 +19,17 @@ which is also known as "garbage collection" mechanism. A vertex gets deleted
 right after the data it contains is read _and_ no other vertices
 transitively point to it.
 
+The current implementation keeps runtime overhead low by interning edge labels
+and indexing them through a hybrid small-map/hash-map structure. Edge payloads
+are stored in a `Hex` helper that keeps tiny blobs inline and promotes larger
+values to reference-counted slices so cloning a graph snapshot stays cheap.
+
 Here is how you can create a di-graph:
 
 ```rust
 use std::str::FromStr as _;
 use sodg::{Hex, Label, Sodg};
-let mut g = Sodg::empty(256);
+let mut g: Sodg<16> = Sodg::empty(256);
 g.add(0); // add a vertex no.0
 g.add(1); // add a vertex no.1
 g.bind(0, 1, Label::from_str("foo").unwrap()); // connect v0 to v1 with label "foo"
@@ -49,6 +54,8 @@ assert_eq!("foo", first.label().to_string());
 assert_eq!(1, first.destination());
 let second = kids.next().unwrap();
 assert_eq!("bar", second.label().to_string());
+let label_id = first.label_id();
+assert!(label_id > 0);
 ```
 
 Then, you can read the data of a vertex:
@@ -63,6 +70,14 @@ Then, you can print the graph:
 
 ```rust
 println!("{:?}", g);
+```
+
+Multi-hop traversals remain ergonomic thanks to [`Sodg::find`], which walks a
+dot-separated path and returns the final vertex if each edge exists:
+
+```rust
+assert_eq!(Some(1), g.find(0, "foo"));
+assert_eq!(None, g.find(0, "foo.baz"));
 ```
 
 Using `merge()`, you can merge two graphs together, provided they are trees.
@@ -82,7 +97,9 @@ Read [the documentation](https://docs.rs/sodg/latest/sodg/).
 
 Criterion benchmarks live under `benches/bench.rs` and cover vertex management,
 edge insertion/removal/lookups, and multi-segment `find()` traversals across
-degrees 1, 31, 32, 33, and 64. Run all Criterion suites with:
+degrees 1, 31, 32, 33, and 64. The label interner and hybrid edge index keep the
+hot path allocation-free for vertices with a small fan-out and continue to scale
+once a vertex surpasses 32 distinct edges. Run all Criterion suites with:
 
 ```bash
 cargo bench --bench bench
