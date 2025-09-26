@@ -22,12 +22,13 @@ transitively point to it.
 Here is how you can create a di-graph:
 
 ```rust
-use sodg::Sodg;
-use sodg::Hex;
+use std::str::FromStr as _;
+use sodg::{Hex, Label, Sodg};
 let mut g = Sodg::empty(256);
 g.add(0); // add a vertex no.0
 g.add(1); // add a vertex no.1
-g.bind(0, 1, "foo"); // connect v0 to v1 with label "foo"
+g.bind(0, 1, Label::from_str("foo").unwrap()); // connect v0 to v1 with label "foo"
+g.bind(0, 1, Label::from_str("bar").unwrap()); // add another edge with label "bar"
 g.put(1, &Hex::from_str_bytes("Hello, world!")); // attach data to v1
 ```
 
@@ -35,17 +36,19 @@ Then, you can find a vertex by the label of an edge departing
 from another vertex:
 
 ```rust
-let id = g.kid(0, "foo");
+let id = g.kid(0, Label::from_str("foo").unwrap()).unwrap();
 assert_eq!(1, id);
 ```
 
 Then, you can find all kids of a vertex:
 
 ```rust
-let kids: Vec<(String, String, usize)> = g.kids(0);
-assert_eq!("foo", kids[0].0);
-assert_eq!("bar", kids[0].1);
-assert_eq!(1, kids[0].2);
+let mut kids = g.kids(0);
+let first = kids.next().unwrap();
+assert_eq!("foo", first.label().to_string());
+assert_eq!(1, first.destination());
+let second = kids.next().unwrap();
+assert_eq!("bar", second.label().to_string());
 ```
 
 Then, you can read the data of a vertex:

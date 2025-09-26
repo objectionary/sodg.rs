@@ -117,6 +117,8 @@ fn canonical_form(label: &Label) -> String {
 mod tests {
     use std::str::FromStr as _;
 
+    use bincode::serde;
+
     use super::*;
 
     #[test]
@@ -162,5 +164,30 @@ mod tests {
             interner.get_or_intern(&label),
             Err(LabelInternerError::CapacityExceeded)
         ));
+    }
+
+    #[test]
+    fn canonicalizes_equivalent_texts() {
+        let mut interner = LabelInterner::default();
+        let padded = Label::Str(['f', 'o', 'o', ' ', ' ', ' ', ' ', ' ']);
+        let trimmed = Label::from_str("foo").unwrap();
+        let first = interner.get_or_intern(&padded).unwrap();
+        let second = interner.get_or_intern(&trimmed).unwrap();
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn reuses_identifiers_after_roundtrip() {
+        let mut interner = LabelInterner::default();
+        let label = Label::from_str("reuse").unwrap();
+        let original = interner.get_or_intern(&label).unwrap();
+        let serialized = serde::encode_to_vec(&interner, bincode::config::legacy()).unwrap();
+        let mut restored: LabelInterner =
+            serde::decode_from_slice(&serialized, bincode::config::legacy())
+                .unwrap()
+                .0;
+        assert_eq!(Some(original), restored.get(&label));
+        let reused = restored.get_or_intern(&label).unwrap();
+        assert_eq!(original, reused);
     }
 }

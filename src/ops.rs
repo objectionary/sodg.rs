@@ -393,9 +393,9 @@ impl<const N: usize> Sodg<N> {
     /// g.add(0);
     /// g.add(42);
     /// g.bind(0, 42, Label::from_str("k").unwrap());
-    /// let (a, to) = g.kids(0).next().unwrap().clone();
-    /// assert_eq!("k", a.to_string());
-    /// assert_eq!(42, *to);
+    /// let kid = g.kids(0).next().unwrap();
+    /// assert_eq!("k", kid.label().to_string());
+    /// assert_eq!(42, kid.destination());
     /// ```
     ///
     /// Just in case, if you need to put all names into a single line:
@@ -410,7 +410,10 @@ impl<const N: usize> Sodg<N> {
     /// g.bind(0, 42, Label::from_str("a").unwrap());
     /// g.bind(0, 42, Label::from_str("b").unwrap());
     /// g.bind(0, 42, Label::from_str("c").unwrap());
-    /// let mut names = g.kids(0).into_iter().map(|(a, _)| a.to_string()).collect::<Vec<String>>();
+    /// let mut names = g
+    ///     .kids(0)
+    ///     .map(|kid| kid.label().to_string())
+    ///     .collect::<Vec<String>>();
     /// names.sort();
     /// assert_eq!("a,b,c", names.join(","));
     /// ```
@@ -419,7 +422,7 @@ impl<const N: usize> Sodg<N> {
     ///
     /// If vertex `v1` is absent, `Err` will be returned.
     #[inline]
-    pub fn kids(&self, v: usize) -> impl Iterator<Item = (&Label, &usize)> + '_ {
+    pub fn kids(&self, v: usize) -> impl Iterator<Item = KidRef<'_>> + '_ {
         let vertex = self
             .vertices
             .get(v)
@@ -492,13 +495,47 @@ impl<const N: usize> Sodg<N> {
 }
 
 /// Iterator returned by [`Sodg::kids`] that yields outbound edges and their destinations.
+/// Borrowed view over an outbound edge returned by [`Sodg::kids`].
+#[derive(Clone, Copy, Debug)]
+pub struct KidRef<'a> {
+    label_id: LabelId,
+    label: &'a Label,
+    destination: &'a usize,
+}
+
+impl<'a> KidRef<'a> {
+    /// Interned identifier that backs the kid's label.
+    #[must_use]
+    pub const fn label_id(&self) -> LabelId {
+        self.label_id
+    }
+
+    /// Structured label that decorates the outbound edge.
+    #[must_use]
+    pub const fn label(&self) -> &'a Label {
+        self.label
+    }
+
+    /// Identifier of the vertex at the other end of the edge.
+    #[must_use]
+    pub const fn destination(&self) -> usize {
+        *self.destination
+    }
+
+    /// Borrowed identifier of the vertex at the other end of the edge.
+    #[must_use]
+    pub const fn destination_ref(&self) -> &'a usize {
+        self.destination
+    }
+}
+
 struct Kids<'a> {
     interner: &'a LabelInterner,
     inner: std::slice::Iter<'a, Edge>,
 }
 
 impl<'a> Iterator for Kids<'a> {
-    type Item = (&'a Label, &'a usize);
+    type Item = KidRef<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
         let edge = self.inner.next()?;
@@ -506,7 +543,11 @@ impl<'a> Iterator for Kids<'a> {
         if let Some(resolved) = self.interner.resolve(edge.label_id) {
             debug_assert_eq!(resolved, edge.label.to_string());
         }
-        Some((&edge.label, &edge.to))
+        Some(KidRef {
+            label_id: edge.label_id,
+            label: &edge.label,
+            destination: &edge.to,
+        })
     }
 }
 
@@ -515,6 +556,19 @@ mod tests {
     use std::str::FromStr as _;
 
     use super::*;
+    use crate::SMALL_THRESHOLD;
+
+    fn build_vertex_with_degree(count: usize) -> Sodg<64> {
+        let mut g: Sodg<64> = Sodg::empty(count + 2);
+        g.add(0);
+        g.add(1);
+        g.add(2);
+        for edge in 0..count {
+            let destination = edge % 2 + 1;
+            g.bind(0, destination, Label::Alpha(edge));
+        }
+        g
+    }
 
     #[test]
     fn adds_simple_vertex() {
@@ -651,8 +705,8 @@ mod tests {
         g.bind(0, 1, Label::from_str("two").unwrap());
         assert_eq!(2, g.kids(0).count());
         let mut names = vec![];
-        for (a, to) in g.kids(0) {
-            names.push(format!("{a}/{to}"));
+        for kid in g.kids(0) {
+            names.push(format!("{}/{}", kid.label(), kid.destination()));
         }
         names.sort();
         assert_eq!("one/1,two/1", names.join(","));
@@ -666,9 +720,96 @@ mod tests {
         g.bind(0, 1, Label::from_str("one").unwrap());
         g.bind(0, 1, Label::from_str("two").unwrap());
         g.bind(0, 1, Label::from_str("three").unwrap());
-        let mut names: Vec<String> = g.kids(0).map(|(a, _)| format!("{a}")).collect();
+        let mut names: Vec<String> = g.kids(0).map(|kid| format!("{}", kid.label())).collect();
         names.sort();
         assert_eq!("one,three,two", names.join(","));
+    }
+
+    #[test]
+    fn kid_handles_single_edge_vertex() {
+        let g = build_vertex_with_degree(1);
+        let vertex = g.vertices.get(0).unwrap();
+        assert!(matches!(vertex.index, EdgeIndex::Small(_)));
+        assert_eq!(Some(1), g.kid(0, Label::Alpha(0)));
+    }
+
+    #[test]
+    fn kid_handles_degree_just_below_threshold() {
+        let g = build_vertex_with_degree(SMALL_THRESHOLD - 1);
+        let vertex = g.vertices.get(0).unwrap();
+        assert!(matches!(vertex.index, EdgeIndex::Small(_)));
+        let label = Label::Alpha(SMALL_THRESHOLD - 2);
+        let expected = (SMALL_THRESHOLD - 2) % 2 + 1;
+        assert_eq!(Some(expected), g.kid(0, label));
+    }
+
+    #[test]
+    fn kid_handles_degree_past_threshold() {
+        let g = build_vertex_with_degree(SMALL_THRESHOLD + 1);
+        let vertex = g.vertices.get(0).unwrap();
+        assert!(matches!(vertex.index, EdgeIndex::Large(_)));
+        let label = Label::Alpha(SMALL_THRESHOLD);
+        let expected = SMALL_THRESHOLD % 2 + 1;
+        assert_eq!(Some(expected), g.kid(0, label));
+    }
+
+    #[test]
+    fn remove_edge_from_small_index_keeps_structures_in_sync() {
+        let mut g = build_vertex_with_degree(3);
+        let label = Label::Alpha(1);
+        let label_id = g.labels.lookup(&label).unwrap();
+        {
+            let vertex = g.vertices.get_mut(0).unwrap();
+            let previous = vertex.edges.len();
+            let removed = vertex.remove_edge(label_id).unwrap();
+            assert_eq!(label_id, removed.label_id);
+            assert_eq!(2, removed.to);
+            assert_eq!(previous - 1, vertex.edges.len());
+            assert_eq!(vertex.edges.len(), vertex.index.len());
+            assert!(matches!(vertex.index, EdgeIndex::Small(_)));
+        }
+        assert!(g.kid(0, label).is_none());
+    }
+
+    #[test]
+    fn remove_edge_from_large_index_keeps_structures_in_sync() {
+        let mut g = build_vertex_with_degree(SMALL_THRESHOLD + 2);
+        let label = Label::Alpha(1);
+        let label_id = g.labels.lookup(&label).unwrap();
+        {
+            let vertex = g.vertices.get_mut(0).unwrap();
+            assert!(matches!(vertex.index, EdgeIndex::Large(_)));
+            let previous = vertex.edges.len();
+            let removed = vertex.remove_edge(label_id).unwrap();
+            assert_eq!(label_id, removed.label_id);
+            assert_eq!(2, removed.to);
+            assert_eq!(previous - 1, vertex.edges.len());
+            assert_eq!(vertex.edges.len(), vertex.index.len());
+        }
+        assert!(matches!(
+            g.vertices.get(0).unwrap().index,
+            EdgeIndex::Large(_)
+        ));
+        assert!(g.kid(0, label).is_none());
+    }
+
+    #[test]
+    fn find_traverses_long_path_and_detects_breaks() {
+        let mut g: Sodg<16> = Sodg::empty(256);
+        let labels = ["s0", "s1", "s2", "s3", "s4"];
+        for vertex in 0..=labels.len() {
+            g.add(vertex);
+        }
+        for (idx, text) in labels.iter().enumerate() {
+            g.bind(
+                idx,
+                idx + 1,
+                Label::from_str(text).expect("valid label for traversal test"),
+            );
+        }
+        assert_eq!(Some(labels.len()), g.find(0, "s0.s1.s2.s3.s4"));
+        assert!(g.find(0, "s0.s1.s2.s3.missing").is_none());
+        assert!(g.find(0, "s0.s1..s3").is_none());
     }
 
     #[test]
