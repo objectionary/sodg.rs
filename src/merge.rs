@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 use std::collections::{HashMap, HashSet};
+use std::convert::TryFrom as _;
 
 use anyhow::{Result, bail};
 use log::debug;
@@ -109,13 +110,21 @@ impl<const N: usize> Sodg<N> {
 
     fn join(&mut self, left: usize, right: usize) {
         for v in self.keys() {
-            let mut nv = self.vertices.get(v).unwrap().clone();
-            for e in &self.vertices.get_mut(v).unwrap().edges {
-                if *e.1 == right {
-                    nv.edges.insert(*e.0, left);
+            let mut updated = self.vertices.get(v).unwrap().clone();
+            let mut changed = false;
+            for edge in &mut updated.edges {
+                if edge.to == right {
+                    edge.to = left;
+                    updated.index.insert(
+                        edge.label_id,
+                        u32::try_from(left).expect("vertex identifier exceeds u32 range"),
+                    );
+                    changed = true;
                 }
             }
-            self.vertices.insert(v, nv);
+            if changed {
+                self.vertices.insert(v, updated);
+            }
         }
         let kids = self
             .kids(right)

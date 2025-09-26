@@ -5,7 +5,9 @@ use anyhow::Context as _;
 #[cfg(debug_assertions)]
 use log::trace;
 
-use crate::{BRANCH_NONE, BRANCH_STATIC, Persistence, Sodg};
+use std::convert::TryFrom as _;
+
+use crate::{BRANCH_NONE, BRANCH_STATIC, Edge, Persistence, Sodg};
 use crate::{Hex, Label};
 
 impl<const N: usize> Sodg<N> {
@@ -63,8 +65,20 @@ impl<const N: usize> Sodg<N> {
     pub fn bind(&mut self, v1: usize, v2: usize, a: Label) {
         let mut ours = self.vertices.get(v1).unwrap().branch;
         let theirs = self.vertices.get(v2).unwrap().branch;
+        let label_id = self.labels.get_or_intern(&a).unwrap();
+        let destination = u32::try_from(v2).expect("vertex identifier exceeds u32 range");
         let vtx1 = self.vertices.get_mut(v1).unwrap();
-        vtx1.edges.insert(a, v2);
+        if let Some(edge) = vtx1.edges.iter_mut().find(|edge| edge.label_id == label_id) {
+            edge.to = v2;
+            edge.label = a;
+        } else {
+            vtx1.edges.push(Edge {
+                label_id,
+                label: a,
+                to: v2,
+            });
+        }
+        vtx1.index.insert(label_id, destination);
         if ours == BRANCH_STATIC {
             if theirs == BRANCH_STATIC {
                 for b in self.branches.iter_mut() {
@@ -237,6 +251,7 @@ impl<const N: usize> Sodg<N> {
             .unwrap()
             .edges
             .iter()
+            .map(|edge| (&edge.label, &edge.to))
     }
 
     /// Find a kid of a vertex, by its edge name, and return the ID of the vertex found.
@@ -260,12 +275,12 @@ impl<const N: usize> Sodg<N> {
     #[must_use]
     #[inline]
     pub fn kid(&self, v: usize, a: Label) -> Option<usize> {
-        for e in &self.vertices.get(v).unwrap().edges {
-            if *e.0 == a {
-                return Some(*e.1);
-            }
-        }
-        None
+        let label_id = self.labels.get(&a)?;
+        let vertex = self.vertices.get(v)?;
+        vertex
+            .index
+            .get(label_id)
+            .map(|stored| usize::try_from(stored).expect("vertex identifier exceeds usize range"))
     }
 }
 

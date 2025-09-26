@@ -34,13 +34,13 @@ impl<const N: usize> Sodg<N> {
             .with_context(|| format!("Can't find ν{v}"))?
             .edges
             .iter()
-            .sorted()
-            .for_each(|e| {
-                let skip = seen.contains(e.1);
+            .sorted_by_key(|edge| edge.label)
+            .for_each(|edge| {
+                let skip = seen.contains(&edge.to);
                 let line = format!(
                     "  .{} ➞ ν{}{}",
-                    e.0,
-                    e.1,
+                    edge.label,
+                    edge.to,
                     if skip {
                         "…".to_owned()
                     } else {
@@ -49,8 +49,8 @@ impl<const N: usize> Sodg<N> {
                 );
                 lines.push(line);
                 if !skip {
-                    seen.insert(*e.1);
-                    self.inspect_v(*e.1, seen)
+                    seen.insert(edge.to);
+                    self.inspect_v(edge.to, seen)
                         .unwrap()
                         .iter()
                         .for_each(|t| lines.push(format!("  {t}")));

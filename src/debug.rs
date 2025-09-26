@@ -23,7 +23,7 @@ impl<const N: usize> Debug for Sodg<N> {
             let mut attrs = vtx
                 .edges
                 .iter()
-                .map(|e| format!("\n\t{} ➞ ν{}", e.0, e.1))
+                .map(|edge| format!("\n\t{} ➞ ν{}", edge.label, edge.to))
                 .collect::<Vec<String>>();
             if vtx.persistence != Persistence::Empty {
                 attrs.push(format!("{}", vtx.data));
@@ -62,7 +62,7 @@ impl<const N: usize> Sodg<N> {
         let list: Vec<String> = vtx
             .edges
             .iter()
-            .map(|e| format!("{}", e.0.clone()))
+            .map(|edge| format!("{}", edge.label))
             .collect();
         Ok(format!(
             "ν{v}⟦{}{}⟧",

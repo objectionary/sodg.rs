@@ -3,7 +3,7 @@
 
 use emap::Map;
 
-use crate::{Hex, LabelInterner, MAX_BRANCHES, Persistence, Sodg, Vertex};
+use crate::{EdgeIndex, Hex, LabelInterner, MAX_BRANCHES, Persistence, Sodg, Vertex};
 
 impl<const N: usize> Sodg<N> {
     /// Make an empty [`Sodg`], with no vertices and no edges.
@@ -20,7 +20,8 @@ impl<const N: usize> Sodg<N> {
                     branch: 0,
                     data: Hex::empty(),
                     persistence: Persistence::Empty,
-                    edges: micromap::Map::new(),
+                    edges: Vec::new(),
+                    index: EdgeIndex::new(),
                 },
             ),
             stores: Map::with_capacity_some(MAX_BRANCHES, 0),
