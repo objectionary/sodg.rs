@@ -42,6 +42,29 @@ impl std::error::Error for LabelInternerError {}
 /// The interner stores labels by their canonical UTF-8 representation while
 /// preserving stable numeric identifiers. `0` is reserved to denote a missing
 /// label.
+///
+/// # Invariants
+///
+/// * Every identifier returned by [`get_or_intern`](Self::get_or_intern) maps to
+///   exactly one canonical UTF-8 label.
+/// * Identifier `0` is never allocated and signals "no label" in serialized
+///   structures.
+/// * Re-interning an existing label always yields the same identifier.
+///
+/// # Examples
+///
+/// ```
+/// use std::str::FromStr as _;
+/// use sodg::{Label, LabelInterner};
+///
+/// let mut interner = LabelInterner::default();
+/// let alpha = Label::Alpha(7);
+/// let hello = Label::from_str("hello").unwrap();
+/// let alpha_id = interner.get_or_intern(&alpha).unwrap();
+/// let hello_id = interner.get_or_intern(&hello).unwrap();
+/// assert_eq!(Some(alpha_id), interner.get(&alpha));
+/// assert_eq!(Some("hello"), interner.resolve(hello_id));
+/// ```
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct LabelInterner {
     forward: HashMap<String, LabelId>,
@@ -78,6 +101,16 @@ impl LabelInterner {
     ///
     /// Returns [`LabelInternerError::CapacityExceeded`] if there is no free
     /// identifier left.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use sodg::{Label, LabelInterner};
+    ///
+    /// let mut interner = LabelInterner::default();
+    /// let id = interner.get_or_intern(&Label::Alpha(0)).unwrap();
+    /// assert_eq!(Some(id), interner.get(&Label::Alpha(0)));
+    /// ```
     pub fn get_or_intern(&mut self, label: &Label) -> Result<LabelId, LabelInternerError> {
         let key = canonical_form(label);
         if let Some(id) = self.forward.get(&key) {
@@ -90,6 +123,17 @@ impl LabelInterner {
     }
 
     /// Retrieve the identifier previously assigned to [`label`](Label).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use sodg::{Label, LabelInterner};
+    ///
+    /// let mut interner = LabelInterner::default();
+    /// interner.get_or_intern(&Label::Alpha(1)).unwrap();
+    /// assert!(interner.get(&Label::Alpha(1)).is_some());
+    /// assert!(interner.get(&Label::Alpha(99)).is_none());
+    /// ```
     #[must_use]
     pub fn get(&self, label: &Label) -> Option<LabelId> {
         let key = canonical_form(label);
@@ -97,6 +141,17 @@ impl LabelInterner {
     }
 
     /// Resolve an identifier into its canonical UTF-8 label.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use sodg::{Label, LabelInterner};
+    ///
+    /// let mut interner = LabelInterner::default();
+    /// let id = interner.get_or_intern(&Label::Alpha(2)).unwrap();
+    /// assert_eq!(Some("α2"), interner.resolve(id));
+    /// assert_eq!(None, interner.resolve(0));
+    /// ```
     pub fn resolve(&self, id: LabelId) -> Option<&str> {
         if id == 0 {
             return None;

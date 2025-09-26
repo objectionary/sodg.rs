@@ -23,11 +23,21 @@ use crate::{Label, LabelId};
 /// while the [`EdgeIndex`] converts the value to `u32` internally to stay
 /// compact.
 ///
+/// # Invariants
+///
+/// * `label_id` always corresponds to the canonical UTF-8 form of `label` in
+///   the owning [`LabelInterner`](crate::LabelInterner).
+/// * `to` stores the public vertex identifier; `EdgeIndex` is responsible for
+///   encoding the same value into its compact `u32` representation.
+///
+/// # Examples
+///
 /// ```
 /// use sodg::{Edge, Label};
 ///
 /// let edge = Edge { label_id: 1, label: Label::Alpha(0), to: 2 };
 /// assert_eq!(1, edge.label_id);
+/// assert_eq!("α0", edge.label.to_string());
 /// assert_eq!(2, edge.to);
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -50,6 +60,28 @@ pub const SMALL_THRESHOLD: usize = 32;
 /// allocations in the common small case. Once the number of tracked labels
 /// exceeds [`crate::SMALL_THRESHOLD`], the index promotes itself to
 /// a [`HashMap`].
+///
+/// # Invariants
+///
+/// * Entries in the index always mirror the set of [`Edge`] values stored on
+///   the owning vertex.
+/// * All stored vertex identifiers are the result of the crate-internal
+///   `encode_vertex_id` helper and must be decoded before being exposed publicly.
+///
+/// # Examples
+///
+/// ```
+/// use sodg::{EdgeIndex, SMALL_THRESHOLD};
+///
+/// let mut index = EdgeIndex::new();
+/// assert!(index.is_empty());
+/// index.insert(1, 42);
+/// assert_eq!(Some(42), index.get(1));
+/// for label in 2..=u32::try_from(SMALL_THRESHOLD).unwrap() {
+///     index.insert(label, label.saturating_mul(2));
+/// }
+/// assert!(index.len() >= SMALL_THRESHOLD);
+/// ```
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum EdgeIndex {
