@@ -34,6 +34,7 @@ mod clone;
 mod ctors;
 mod debug;
 mod dot;
+mod edge_index;
 mod hex;
 mod inspect;
 mod label;
@@ -48,6 +49,7 @@ mod slice;
 mod xml;
 
 pub use crate::labels::{LabelId, LabelInterner, LabelInternerError};
+pub use edge_index::{Edge, EdgeIndex, SMALL_THRESHOLD};
 
 const HEX_SIZE: usize = 8;
 const MAX_BRANCHES: usize = 16;
@@ -156,7 +158,8 @@ struct Vertex<const N: usize> {
     branch: usize,
     data: Hex,
     persistence: Persistence,
-    edges: micromap::Map<Label, usize, N>,
+    edges: Vec<Edge>,
+    index: EdgeIndex,
 }
 
 #[cfg(test)]

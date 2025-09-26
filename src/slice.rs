@@ -49,15 +49,15 @@ impl<const N: usize> Sodg<N> {
             let before: Vec<usize> = todo.drain().collect();
             for v in before {
                 done.insert(v);
-                for e in &self.vertices.get(v).unwrap().edges {
-                    if done.contains(e.1) {
+                for edge in &self.vertices.get(v).unwrap().edges {
+                    if done.contains(&edge.to) {
                         continue;
                     }
-                    if !p(v, *e.1, *e.0) {
+                    if !p(v, edge.to, edge.label) {
                         continue;
                     }
-                    done.insert(*e.1);
-                    todo.insert(*e.1);
+                    done.insert(edge.to);
+                    todo.insert(edge.to);
                 }
             }
         }
@@ -66,10 +66,10 @@ impl<const N: usize> Sodg<N> {
             if done.contains(&v1) {
                 ng.add(v1);
             }
-            for (k, v2) in &vtx.edges {
-                if done.contains(v2) {
-                    ng.add(*v2);
-                    ng.bind(v1, *v2, *k);
+            for edge in &vtx.edges {
+                if done.contains(&edge.to) {
+                    ng.add(edge.to);
+                    ng.bind(v1, edge.to, edge.label);
                 }
             }
         }
