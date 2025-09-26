@@ -34,6 +34,7 @@ regex = "1.11.1"
 rstest = "0.26.0"
 rustc-hash = "2.1.1"
 serde = { version = "1.0.219", features = ["derive"] }
+serde_bytes = "0.11.15"
 simple_logger = "5.0.0"
 sxd-document = "0.3.2"
 sxd-xpath = "0.4.2"

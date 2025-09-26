@@ -103,13 +103,13 @@ mod tests {
         g.put(0, &Hex::from_str_bytes("hello"));
         g.add(1);
         let label = Label::from_str("foo").unwrap();
-        g.bind(0, 1, label.clone());
+        g.bind(0, 1, label);
         let tmp = TempDir::new().unwrap();
         let file = tmp.path().join("foo.sodg");
         g.save(file.as_path()).unwrap();
         let after: Sodg<1> = Sodg::load(file.as_path()).unwrap();
         assert_eq!(g.inspect(0).unwrap(), after.inspect(0).unwrap());
-        assert_eq!(Some(1), after.kid(0, label.clone()));
+        assert_eq!(Some(1), after.kid(0, label));
         let (loaded_label, destination) = after.kids(0).next().unwrap();
         assert_eq!(&label, loaded_label);
         assert_eq!(1, *destination);
