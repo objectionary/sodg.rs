@@ -606,15 +606,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "microstack"
-version = "0.0.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b84c0e18714cc3401b78d510d2a8874c5c3b1706eb08a647c718e9f686b5d59e"
-dependencies = [
- "serde",
-]
-
-[[package]]
 name = "nohash-hasher"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1068,6 +1059,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "smallvec"
+version = "1.15.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "sodg"
 version = "0.0.0"
 dependencies = [
@@ -1084,7 +1084,6 @@ dependencies = [
  "libc",
  "log",
  "micromap",
- "microstack",
  "nohash-hasher",
  "openssl",
  "predicates",
@@ -1094,6 +1093,7 @@ dependencies = [
  "serde",
  "serde_bytes",
  "simple_logger",
+ "smallvec",
  "sxd-document",
  "sxd-xpath",
  "tempfile",

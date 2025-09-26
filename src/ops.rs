@@ -759,6 +759,20 @@ mod tests {
     }
 
     #[test]
+    fn grows_branch_beyond_inline_capacity() {
+        let mut g: Sodg<16> = Sodg::empty(256);
+        g.add(0);
+        for vertex in 1..=20 {
+            g.add(vertex);
+            g.bind(0, vertex, Label::Alpha(vertex));
+        }
+        let branch = g.vertices.get(0).unwrap().branch;
+        let members = g.branches.get(branch).unwrap();
+        assert!(members.len() > 16);
+        assert!(members.contains(&20));
+    }
+
+    #[test]
     fn kid_handles_single_edge_vertex() {
         let g = build_vertex_with_degree(1);
         let vertex = g.vertices.get(0).unwrap();
