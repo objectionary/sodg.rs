@@ -30,6 +30,14 @@ impl<const N: usize> Vertex<N> {
         self.index.insert(label_id, destination);
     }
 
+    pub(crate) fn rebuild_index(&mut self) {
+        let pairs = self
+            .edges
+            .iter()
+            .map(|edge| (edge.label_id, Sodg::<N>::encode_vertex_id(edge.to)));
+        self.index.rebuild(pairs);
+    }
+
     #[allow(dead_code)]
     fn remove_edge(&mut self, label_id: LabelId) -> Option<Edge> {
         let position = self

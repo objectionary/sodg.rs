@@ -159,6 +159,7 @@ struct Vertex<const N: usize> {
     data: Hex,
     persistence: Persistence,
     edges: Vec<Edge>,
+    #[serde(skip)]
     index: EdgeIndex,
 }
 
