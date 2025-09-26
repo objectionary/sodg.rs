@@ -52,6 +52,7 @@ impl Script {
     ///
     /// If impossible to deploy, an error will be returned.
     pub fn deploy_to<const N: usize>(&mut self, g: &mut Sodg<N>) -> Result<usize> {
+        self.vars.clear();
         let mut pos = 0;
         for cmd in &self.commands() {
             trace!("#deploy_to: deploying command no.{} '{}'...", pos + 1, cmd);
@@ -127,10 +128,13 @@ impl Script {
         if !DATA.is_match(d) {
             bail!("Can't parse data '{s}'");
         }
-        let bytes: Vec<u8> = (0..d.len())
-            .step_by(2)
-            .map(|i| u8::from_str_radix(&d[i..i + 2], 16).unwrap())
-            .collect();
+        let mut bytes = Vec::with_capacity(d.len() / 2);
+        for i in (0..d.len()).step_by(2) {
+            let pair = &d[i..i + 2];
+            let byte = u8::from_str_radix(pair, 16)
+                .with_context(|| format!("Can't parse data '{s}', invalid byte '{pair}'"))?;
+            bytes.push(byte);
+        }
         Ok(Hex::from_vec(bytes))
     }
 
@@ -194,5 +198,16 @@ mod tests {
         let deployed = script.deploy_to(&mut g).unwrap();
         assert_eq!(1, deployed);
         assert!(g.data(0).is_none());
+    }
+
+    #[test]
+    fn resets_variables_between_deployments() {
+        let mut g: Sodg<16> = Sodg::empty(16);
+        let mut script = Script::from_str("ADD(0); ADD($ν1);");
+        script.deploy_to(&mut g).unwrap();
+        let initial_len = g.len();
+        script.deploy_to(&mut g).unwrap();
+        assert_eq!(initial_len + 1, g.len());
+        assert!(g.keys().contains(&2));
     }
 }
