@@ -77,12 +77,13 @@ impl<const N: usize> Sodg<N> {
 
 #[cfg(test)]
 mod tests {
+    use std::convert::TryFrom as _;
     use std::str::FromStr as _;
 
     use tempfile::TempDir;
 
     use super::*;
-    use crate::{Hex, Label};
+    use crate::{EdgeIndex, Hex, Label, SMALL_THRESHOLD};
 
     #[test]
     fn can_save() {
@@ -110,8 +111,35 @@ mod tests {
         let after: Sodg<1> = Sodg::load(file.as_path()).unwrap();
         assert_eq!(g.inspect(0).unwrap(), after.inspect(0).unwrap());
         assert_eq!(Some(1), after.kid(0, label));
-        let (loaded_label, destination) = after.kids(0).next().unwrap();
-        assert_eq!(&label, loaded_label);
-        assert_eq!(1, *destination);
+        let kid = after.kids(0).next().unwrap();
+        assert_eq!(label, *kid.label());
+        assert_eq!(1, kid.destination());
+    }
+
+    #[test]
+    fn rebuilds_indices_and_labels_after_roundtrip() {
+        let mut g: Sodg<64> = Sodg::empty(512);
+        g.add(0);
+        g.add(1);
+        g.add(2);
+        for idx in 0..(SMALL_THRESHOLD + 3) {
+            let destination = idx % 2 + 1;
+            g.bind(0, destination, Label::Alpha(idx));
+        }
+        let tmp = TempDir::new().unwrap();
+        let file = tmp.path().join("roundtrip.sodg");
+        g.save(file.as_path()).unwrap();
+        let after: Sodg<64> = Sodg::load(file.as_path()).unwrap();
+        let vertex = after.vertices.get(0).unwrap();
+        assert!(matches!(vertex.index, EdgeIndex::Large(_)));
+        assert_eq!(vertex.edges.len(), vertex.index.len());
+        for edge in &vertex.edges {
+            let encoded = u32::try_from(edge.to).expect("vertex identifier fits into u32");
+            assert_eq!(Some(encoded), vertex.index.get(edge.label_id));
+            let label_text = after.edge_label_text(edge);
+            let parsed = Label::from_str(label_text.as_ref()).expect("edge label parsed");
+            assert_eq!(edge.to, after.kid(0, parsed).expect("kid found after load"));
+            assert_eq!(Some(edge.label_id), after.labels.get(&edge.label));
+        }
     }
 }

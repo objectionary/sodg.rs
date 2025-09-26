@@ -82,23 +82,27 @@ impl<const N: usize> Sodg<N> {
         if g.vertices.get(right).unwrap().persistence != Persistence::Empty {
             self.put(left, &g.vertices.get(right).unwrap().data);
         }
-        for (a, to) in g.kids(right) {
-            let matched = if let Some(t) = self.kid(left, *a) {
+        for kid in g.kids(right) {
+            let label = *kid.label();
+            let destination = kid.destination();
+            let matched = if let Some(t) = self.kid(left, label) {
                 t
-            } else if let Some(t) = mapped.get(to) {
-                self.bind(left, *t, *a);
+            } else if let Some(t) = mapped.get(&destination) {
+                self.bind(left, *t, label);
                 *t
             } else {
                 let id = self.next_id();
                 self.add(id);
-                self.bind(left, id, *a);
+                self.bind(left, id, label);
                 id
             };
-            self.merge_rec(g, matched, *to, mapped)?;
+            self.merge_rec(g, matched, destination, mapped)?;
         }
-        for (a, to) in g.kids(right) {
-            if let Some(first) = self.kid(left, *a)
-                && let Some(second) = mapped.get(to)
+        for kid in g.kids(right) {
+            let label = *kid.label();
+            let destination = kid.destination();
+            if let Some(first) = self.kid(left, label)
+                && let Some(second) = mapped.get(&destination)
                 && first != *second
             {
                 self.join(first, *second);
