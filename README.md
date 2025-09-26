@@ -95,29 +95,73 @@ Read [the documentation](https://docs.rs/sodg/latest/sodg/).
 
 ## Benchmarks
 
-Criterion benchmarks live under `benches/bench.rs` and cover vertex management,
-edge insertion/removal/lookups, and multi-segment `find()` traversals across
-degrees 1, 31, 32, 33, and 64. The label interner and hybrid edge index keep the
-hot path allocation-free for vertices with a small fan-out and continue to scale
-once a vertex surpasses 32 distinct edges. Run all Criterion suites with:
+The project ships two complementary benchmarking harnesses:
 
-```bash
-cargo bench --bench bench
-```
+* A [Criterion](https://github.com/bheisler/criterion.rs) suite in
+  `benches/bench.rs` that measures wall-clock performance of vertex management,
+  edge insertion/removal/lookups, and multi-segment `find()` traversals across
+  different out-degrees.
+* An [`iai-callgrind`](https://github.com/gungraun/gungraun) harness in
+  `benches/edge_index.rs` (guarded by the `callgrind` feature) that collects
+  Valgrind statistics for the same scenarios.
 
-Individual benches can be executed with `cargo bench -- bench_name`, for
-example `cargo bench -- edge_index_insert`.
+Criterion only requires a stable Rust toolchain. Gnuplot is optional; when it is
+not installed, Criterion falls back to the bundled Plotters backend for report
+generation.
 
-The repository also ships an [`iai-callgrind`](https://github.com/iai-callgrind/iai-callgrind)
-harness in `benches/edge_index.rs` that records the same scenarios under
-Callgrind. Install Valgrind locally, enable the `callgrind` feature, and run:
+### Running Criterion locally
 
-```bash
-cargo bench --features callgrind --bench edge_index
-```
+1. Build and run all Criterion benchmarks:
+   ```bash
+   cargo bench --bench bench
+   ```
+2. Inspect the generated reports under
+   `target/criterion/<benchmark>/<measurement>/report/index.html`. They include
+   plots, summary statistics, and raw sample data.
 
-When the feature is not enabled, the binary prints a short message and exits so
-it can be kept in regular workflows without requiring Callgrind.
+### Comparing against a saved baseline
+
+Criterion can persist previous results to highlight regressions and
+improvements:
+
+1. Check out the branch or commit that should become the reference point (for
+   example `master`) and save a baseline:
+   ```bash
+   cargo bench --bench bench -- --save-baseline master
+   ```
+   The snapshot is stored inside `target/criterion` and can be reused across
+   branches as long as the directory is kept intact.
+2. Switch back to your working branch and compare the current code against the
+   saved numbers:
+   ```bash
+   cargo bench --bench bench -- --baseline master
+   ```
+3. Examine the console output or open the HTML reports to see per-benchmark
+   percentage changes. Positive percentages indicate improvements, negative ones
+   signal regressions.
+
+To focus on a single benchmark group, pass its name after a double dash, e.g.
+`cargo bench --bench bench -- find_multi_segment`.
+
+### Running the Callgrind harness
+
+The Callgrind harness provides instruction- and cache-level metrics:
+
+1. Install Valgrind (`apt install valgrind` on Debian/Ubuntu). Gungraun supports
+   Linux and other platforms with working Valgrind ports; Windows is not
+   supported.
+2. Enable the `callgrind` feature and execute the harness:
+   ```bash
+   cargo bench --features callgrind --bench edge_index
+   ```
+3. Review the generated profiles under `target/iai` with tools like
+   `kcachegrind`, `callgrind_annotate`, or Gungraun’s HTML report. This makes it
+   easy to inspect hot paths and validate that optimizations change instruction
+   counts in the intended way.
+
+When the feature is not enabled, the `edge_index` binary prints a short message
+and exits immediately so the harness can stay in the repository without adding a
+hard dependency on Valgrind.
 
 ## How to Contribute
 
