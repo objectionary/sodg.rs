@@ -64,7 +64,7 @@ impl Script {
 
     /// Get all commands.
     fn commands(&self) -> Vec<String> {
-        static STRIP_COMMENTS: Lazy<Regex> = Lazy::new(|| Regex::new("#.*\n").unwrap());
+        static STRIP_COMMENTS: Lazy<Regex> = Lazy::new(|| Regex::new(r"#.*(?:\r?\n|$)").unwrap());
         let text = self.txt.as_str();
         let clean: &str = &STRIP_COMMENTS.replace_all(text, "");
         clean
@@ -176,5 +176,23 @@ mod tests {
         assert_eq!(1, g.kid(0, label.clone()).unwrap());
         assert_eq!("привет", g.data(1).unwrap().to_utf8().unwrap());
         assert!(g.kid(0, label).is_none());
+    }
+
+    #[test]
+    fn ignores_trailing_line_comment_without_newline() {
+        let mut g: Sodg<16> = Sodg::empty(16);
+        let mut script = Script::from_str("ADD(0);\n# trailing comment");
+        let deployed = script.deploy_to(&mut g).unwrap();
+        assert_eq!(1, deployed);
+        assert!(g.data(0).is_none());
+    }
+
+    #[test]
+    fn ignores_inline_trailing_comment_without_newline() {
+        let mut g: Sodg<16> = Sodg::empty(16);
+        let mut script = Script::from_str("ADD(0); # trailing comment");
+        let deployed = script.deploy_to(&mut g).unwrap();
+        assert_eq!(1, deployed);
+        assert!(g.data(0).is_none());
     }
 }
