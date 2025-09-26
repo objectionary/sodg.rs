@@ -78,6 +78,30 @@ of the graph (mostly for debugging purposes).
 
 Read [the documentation](https://docs.rs/sodg/latest/sodg/).
 
+## Benchmarks
+
+Criterion benchmarks live under `benches/bench.rs` and cover vertex management,
+edge insertion/removal/lookups, and multi-segment `find()` traversals across
+degrees 1, 31, 32, 33, and 64. Run all Criterion suites with:
+
+```bash
+cargo bench --bench bench
+```
+
+Individual benches can be executed with `cargo bench -- bench_name`, for
+example `cargo bench -- edge_index_insert`.
+
+The repository also ships an [`iai-callgrind`](https://github.com/iai-callgrind/iai-callgrind)
+harness in `benches/edge_index.rs` that records the same scenarios under
+Callgrind. Install Valgrind locally, enable the `callgrind` feature, and run:
+
+```bash
+cargo bench --features callgrind --bench edge_index
+```
+
+When the feature is not enabled, the binary prints a short message and exits so
+it can be kept in regular workflows without requiring Callgrind.
+
 ## How to Contribute
 
 First, install [Rust](https://www.rust-lang.org/tools/install) and then:
