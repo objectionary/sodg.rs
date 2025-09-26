@@ -6,8 +6,11 @@ use std::ops::{
     Index, IndexMut, Range, RangeFrom, RangeFull, RangeInclusive, RangeTo, RangeToInclusive,
 };
 use std::str::FromStr;
+use std::sync::Arc;
 
 use anyhow::{Context as _, Result};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde_bytes::{ByteBuf, Bytes};
 
 use crate::{HEX_SIZE, Hex};
 
@@ -36,7 +39,7 @@ impl Index<usize> for Hex {
 
     fn index(&self, index: usize) -> &Self::Output {
         match self {
-            Self::Vector(v) => &v[index],
+            Self::Shared(v) => &v[index],
             Self::Bytes(a, len) => {
                 if index < *len {
                     &a[index]
@@ -51,7 +54,7 @@ impl Index<usize> for Hex {
 impl IndexMut<usize> for Hex {
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
         match self {
-            Self::Vector(v) => &mut v[index],
+            Self::Shared(v) => &mut Arc::make_mut(v)[index],
             Self::Bytes(a, len) => {
                 if index < *len {
                     &mut a[index]
@@ -68,7 +71,7 @@ impl Index<Range<usize>> for Hex {
 
     fn index(&self, index: Range<usize>) -> &Self::Output {
         match self {
-            Self::Vector(v) => &v[index],
+            Self::Shared(v) => &v[index],
             Self::Bytes(a, len) => {
                 if index.end <= *len {
                     &a[index]
@@ -85,7 +88,7 @@ impl Index<RangeFrom<usize>> for Hex {
 
     fn index(&self, index: RangeFrom<usize>) -> &Self::Output {
         match self {
-            Self::Vector(v) => &v[index],
+            Self::Shared(v) => &v[index],
             Self::Bytes(a, len) => {
                 if index.start <= *len {
                     &a[index.start..*len]
@@ -102,7 +105,7 @@ impl Index<RangeFull> for Hex {
 
     fn index(&self, index: RangeFull) -> &Self::Output {
         match self {
-            Self::Vector(v) => &v[index],
+            Self::Shared(v) => &v[index],
             Self::Bytes(a, len) => &a[0..*len],
         }
     }
@@ -113,7 +116,7 @@ impl Index<RangeInclusive<usize>> for Hex {
 
     fn index(&self, index: RangeInclusive<usize>) -> &Self::Output {
         match self {
-            Self::Vector(v) => &v[index],
+            Self::Shared(v) => &v[index],
             Self::Bytes(a, len) => {
                 if *index.end() < *len {
                     &a[index]
@@ -130,7 +133,7 @@ impl Index<RangeTo<usize>> for Hex {
 
     fn index(&self, index: RangeTo<usize>) -> &Self::Output {
         match self {
-            Self::Vector(v) => &v[index],
+            Self::Shared(v) => &v[index],
             Self::Bytes(a, len) => {
                 if index.end <= *len {
                     &a[index]
@@ -147,7 +150,7 @@ impl Index<RangeToInclusive<usize>> for Hex {
 
     fn index(&self, index: RangeToInclusive<usize>) -> &Self::Output {
         match self {
-            Self::Vector(v) => &v[index],
+            Self::Shared(v) => &v[index],
             Self::Bytes(a, len) => {
                 if index.end < *len {
                     &a[index]
@@ -194,7 +197,7 @@ impl Hex {
     #[must_use]
     pub fn bytes(&self) -> &[u8] {
         match self {
-            Self::Vector(v) => v,
+            Self::Shared(v) => v.as_ref(),
             Self::Bytes(array, size) => &array[..*size],
         }
     }
@@ -220,7 +223,7 @@ impl Hex {
     #[allow(clippy::missing_const_for_fn)]
     pub fn len(&self) -> usize {
         match self {
-            Self::Vector(x) => x.len(),
+            Self::Shared(bytes) => bytes.len(),
             Self::Bytes(_, size) => *size,
         }
     }
@@ -248,7 +251,7 @@ impl Hex {
                 slice.len(),
             )
         } else {
-            Self::Vector(slice.to_vec())
+            Self::Shared(Arc::from(slice))
         }
     }
 
@@ -264,9 +267,11 @@ impl Hex {
     #[must_use]
     pub fn from_vec(bytes: Vec<u8>) -> Self {
         if bytes.len() <= HEX_SIZE {
-            Self::from_slice(&bytes)
+            let mut array = [0; HEX_SIZE];
+            array[..bytes.len()].copy_from_slice(&bytes);
+            Self::Bytes(array, bytes.len())
         } else {
-            Self::Vector(bytes)
+            Self::Shared(bytes.into())
         }
     }
 
@@ -464,10 +469,11 @@ impl Hex {
     #[must_use]
     pub fn concat(&self, h: &Self) -> Self {
         match &self {
-            Self::Vector(v) => {
-                let mut vx = v.clone();
-                vx.extend_from_slice(h.bytes());
-                Self::Vector(vx)
+            Self::Shared(v) => {
+                let mut merged = Vec::with_capacity(v.len() + h.len());
+                merged.extend_from_slice(v.as_ref());
+                merged.extend_from_slice(h.bytes());
+                Self::Shared(Arc::from(merged))
             }
             Self::Bytes(b, l) => {
                 if l + h.len() <= HEX_SIZE {
@@ -475,13 +481,32 @@ impl Hex {
                     bytes[*l..*l + h.len()].copy_from_slice(h.bytes());
                     Self::Bytes(bytes, l + h.len())
                 } else {
-                    let mut v = Vec::new();
-                    v.extend_from_slice(b);
+                    let mut v = Vec::with_capacity(l + h.len());
+                    v.extend_from_slice(&b[..*l]);
                     v.extend_from_slice(h.bytes());
-                    Self::Vector(v)
+                    Self::Shared(Arc::from(v))
                 }
             }
         }
+    }
+}
+
+impl Serialize for Hex {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        Bytes::new(self.bytes()).serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for Hex {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let buf = ByteBuf::deserialize(deserializer)?;
+        Ok(Self::from_slice(buf.as_ref()))
     }
 }
 
@@ -633,6 +658,9 @@ impl FromStr for Hex {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bincode::config::legacy;
+    use bincode::serde::{decode_from_slice, encode_to_vec};
+    use std::sync::Arc;
 
     #[test]
     fn simple_int() {
@@ -818,12 +846,44 @@ mod tests {
     }
 
     #[test]
+    fn large_inputs_use_shared_variant() {
+        let data: Vec<u8> = (0..32).collect();
+        let hex = Hex::from_vec(data.clone());
+        if let Hex::Shared(ref shared) = hex {
+            assert_eq!(shared.len(), data.len());
+        } else {
+            panic!("expected shared variant for large payloads");
+        }
+    }
+
+    #[test]
+    fn small_inputs_remain_inline() {
+        let hex = Hex::from_vec(vec![1_u8, 2_u8]);
+        if let Hex::Bytes(_, len) = hex {
+            assert_eq!(len, 2);
+        } else {
+            panic!("expected inline bytes variant");
+        }
+    }
+
+    #[test]
+    fn clones_share_backing_storage() {
+        let data: Vec<u8> = (0..32).collect();
+        let hex = Hex::from_vec(data);
+        let cloned = hex.clone();
+        let (Hex::Shared(left), Hex::Shared(right)) = (&hex, &cloned) else {
+            panic!("expected shared variants");
+        };
+        assert!(Arc::ptr_eq(left, right));
+    }
+
+    #[test]
     fn concatenates_from_hex_vec() {
         let a = Hex::from_vec(vec![0x12, 0xAB]);
         let b = Hex::from_slice(b"as_bytesss");
         let c = Hex::from_vec(vec![0x12, 0xAD]);
         let res = a.concat(&b).concat(&c);
-        assert_eq!(20, res.len());
+        assert_eq!(14, res.len());
     }
 
     #[test]
@@ -833,6 +893,30 @@ mod tests {
         let c = Hex::from_str_bytes("Пока!");
         let res = a.concat(&b).concat(&c);
         assert_eq!(24, res.len());
+    }
+
+    #[test]
+    fn serde_roundtrip_inline() {
+        let original = Hex::from_vec(vec![0x01, 0x02, 0x03]);
+        let serialized = encode_to_vec(&original, legacy()).unwrap();
+        let (decoded, _) = decode_from_slice::<Hex, _>(&serialized, legacy()).unwrap();
+        assert_eq!(original, decoded);
+        let Hex::Bytes(_, len) = decoded else {
+            panic!("expected inline bytes variant");
+        };
+        assert_eq!(len, 3);
+    }
+
+    #[test]
+    fn serde_roundtrip_shared() {
+        let original = Hex::from_vec((0_u8..32).collect());
+        let serialized = encode_to_vec(&original, legacy()).unwrap();
+        let (decoded, _) = decode_from_slice::<Hex, _>(&serialized, legacy()).unwrap();
+        assert_eq!(original, decoded);
+        let (Hex::Shared(left), Hex::Shared(right)) = (&original, &decoded) else {
+            panic!("expected shared variants");
+        };
+        assert_eq!(left.len(), right.len());
     }
 
     #[test]

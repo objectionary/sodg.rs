@@ -27,6 +27,7 @@
 #![allow(clippy::multiple_crate_versions)]
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
@@ -73,9 +74,9 @@ const MAX_BRANCH_SIZE: usize = 16;
 /// let d = Hex::from(65534_i64);
 /// assert_eq!(65534, d.to_i64().unwrap());
 /// ```
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Clone)]
 pub enum Hex {
-    Vector(Vec<u8>),
+    Shared(Arc<[u8]>),
     Bytes([u8; HEX_SIZE], usize),
 }
 

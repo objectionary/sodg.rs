@@ -152,13 +152,14 @@ mod tests {
     #[test]
     fn promotes_once_threshold_exceeded() {
         let mut index = EdgeIndex::new();
-        for label in 0..SMALL_THRESHOLD as u32 {
+        let threshold = u32::try_from(SMALL_THRESHOLD).expect("SMALL_THRESHOLD fits into u32");
+        for label in 0..threshold {
             index.insert(label, label + 1);
         }
         assert!(matches!(index, EdgeIndex::Small(_)));
-        index.insert(SMALL_THRESHOLD as u32, 99);
+        index.insert(threshold, 99);
         assert!(matches!(index, EdgeIndex::Large(_)));
-        assert_eq!(Some(99), index.get(SMALL_THRESHOLD as u32));
+        assert_eq!(Some(99), index.get(threshold));
     }
 
     #[test]
@@ -167,7 +168,8 @@ mod tests {
         index.insert(1, 2);
         assert_eq!(Some(2), index.remove(1));
         assert_eq!(None, index.remove(1));
-        index.rebuild((0..=SMALL_THRESHOLD as u32).map(|label| (label, label + 1)));
+        let threshold = u32::try_from(SMALL_THRESHOLD).expect("SMALL_THRESHOLD fits into u32");
+        index.rebuild((0..=threshold).map(|label| (label, label + 1)));
         assert!(matches!(index, EdgeIndex::Large(_)));
         assert_eq!(Some(2), index.remove(1));
         assert_eq!(None, index.get(1));

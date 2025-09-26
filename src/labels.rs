@@ -153,8 +153,10 @@ mod tests {
 
     #[test]
     fn respects_capacity_limit() {
-        let mut interner = LabelInterner::default();
-        interner.next = NextLabelId(LabelId::MAX);
+        let mut interner = LabelInterner {
+            next: NextLabelId(LabelId::MAX),
+            ..LabelInterner::default()
+        };
         let label = Label::Alpha(123);
         assert!(matches!(
             interner.get_or_intern(&label),
