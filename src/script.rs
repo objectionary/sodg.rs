@@ -172,7 +172,9 @@ mod tests {
         );
         let total = s.deploy_to(&mut g).unwrap();
         assert_eq!(4, total);
+        let label = Label::from_str("foo").unwrap();
+        assert_eq!(1, g.kid(0, label.clone()).unwrap());
         assert_eq!("привет", g.data(1).unwrap().to_utf8().unwrap());
-        assert_eq!(1, g.kid(0, Label::from_str("foo").unwrap()).unwrap());
+        assert!(g.kid(0, label).is_none());
     }
 }
