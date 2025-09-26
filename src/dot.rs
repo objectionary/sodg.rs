@@ -3,7 +3,7 @@
 
 use itertools::Itertools;
 
-use crate::{Label, Persistence, Sodg};
+use crate::{Persistence, Sodg};
 
 impl<const N: usize> Sodg<N> {
     /// Print SODG as a DOT graph.
@@ -62,31 +62,25 @@ digraph {
                     format!("/* {} */", vtx.data)
                 },
             ));
-            for edge in vtx.edges.iter().sorted_by_key(|edge| edge.label) {
+            let mut edges = vtx
+                .edges
+                .iter()
+                .map(|edge| (self.edge_label_text(edge).into_owned(), edge.to))
+                .collect::<Vec<_>>();
+            edges.sort_by(|left, right| left.0.cmp(&right.0));
+            for (label, destination) in edges {
+                let color = if matches!(label.as_str(), "ρ" | "σ") {
+                    ",color=gray,fontcolor=gray"
+                } else {
+                    ""
+                };
+                let style = if label.as_str() == "π" {
+                    ",style=dashed"
+                } else {
+                    ""
+                };
                 lines.push(format!(
-                    "  v{v} -> v{} [label=\"{}\"{}{}];",
-                    edge.to,
-                    edge.label,
-                    match edge.label {
-                        Label::Greek(g) => {
-                            if g == 'ρ' || g == 'σ' {
-                                ",color=gray,fontcolor=gray"
-                            } else {
-                                ""
-                            }
-                        }
-                        _ => {
-                            ""
-                        }
-                    },
-                    match edge.label {
-                        Label::Greek(g) => {
-                            if g == 'π' { ",style=dashed" } else { "" }
-                        }
-                        _ => {
-                            ""
-                        }
-                    }
+                    "  v{v} -> v{destination} [label=\"{label}\"{color}{style}];"
                 ));
             }
         }
@@ -96,7 +90,7 @@ digraph {
 }
 
 #[cfg(test)]
-use crate::Hex;
+use crate::{Hex, Label};
 
 #[test]
 fn simple_graph_to_dot() {

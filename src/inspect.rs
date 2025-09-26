@@ -4,7 +4,6 @@
 use std::collections::HashSet;
 
 use anyhow::{Context as _, Result};
-use itertools::Itertools;
 
 use crate::Sodg;
 
@@ -29,33 +28,31 @@ impl<const N: usize> Sodg<N> {
     fn inspect_v(&self, v: usize, seen: &mut HashSet<usize>) -> Result<Vec<String>> {
         seen.insert(v);
         let mut lines = vec![];
-        self.vertices
+        let vertex = self
+            .vertices
             .get(v)
-            .with_context(|| format!("Can't find ν{v}"))?
+            .with_context(|| format!("Can't find ν{v}"))?;
+        let mut edges = vertex
             .edges
             .iter()
-            .sorted_by_key(|edge| edge.label)
-            .for_each(|edge| {
-                let skip = seen.contains(&edge.to);
-                let line = format!(
-                    "  .{} ➞ ν{}{}",
-                    edge.label,
-                    edge.to,
-                    if skip {
-                        "…".to_owned()
-                    } else {
-                        String::new()
-                    },
-                );
-                lines.push(line);
-                if !skip {
-                    seen.insert(edge.to);
-                    self.inspect_v(edge.to, seen)
-                        .unwrap()
-                        .iter()
-                        .for_each(|t| lines.push(format!("  {t}")));
-                }
-            });
+            .map(|edge| (self.edge_label_text(edge).into_owned(), edge.to))
+            .collect::<Vec<_>>();
+        edges.sort_by(|left, right| left.0.cmp(&right.0));
+        for (label, destination) in edges {
+            let skip = seen.contains(&destination);
+            let mut line = format!("  .{label} ➞ ν{destination}");
+            if skip {
+                line.push('…');
+            }
+            lines.push(line);
+            if skip {
+                continue;
+            }
+            seen.insert(destination);
+            for text in self.inspect_v(destination, seen)? {
+                lines.push(format!("  {text}"));
+            }
+        }
         Ok(lines)
     }
 }
