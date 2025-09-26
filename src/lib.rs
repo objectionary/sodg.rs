@@ -37,6 +37,7 @@ mod dot;
 mod hex;
 mod inspect;
 mod label;
+mod labels;
 mod merge;
 mod misc;
 mod next;
@@ -45,6 +46,8 @@ mod script;
 mod serialization;
 mod slice;
 mod xml;
+
+pub use crate::labels::{LabelId, LabelInterner, LabelInternerError};
 
 const HEX_SIZE: usize = 8;
 const MAX_BRANCHES: usize = 16;
@@ -75,6 +78,10 @@ pub enum Hex {
 }
 
 /// A label on an edge.
+///
+/// Labels remain strongly typed through this enum, while the
+/// [`LabelInterner`] stores their canonical UTF-8 representation to match the
+/// `&str`-based expectations of external integrations.
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy, Serialize, Deserialize)]
 pub enum Label {
     Greek(char),
@@ -127,6 +134,8 @@ pub struct Sodg<const N: usize> {
     stores: emap::Map<usize>,
     branches: emap::Map<microstack::Stack<usize, MAX_BRANCH_SIZE>>,
     vertices: emap::Map<Vertex<N>>,
+    /// Interned labels that back the graph's edge metadata.
+    labels: LabelInterner,
     /// This is the next ID of a vertex to be returned by the [`Sodg::next_v`] function.
     #[serde(skip_serializing, skip_deserializing)]
     next_v: usize,

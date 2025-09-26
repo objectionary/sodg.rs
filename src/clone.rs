@@ -10,6 +10,7 @@ impl<const N: usize> Clone for Sodg<N> {
             vertices: self.vertices.clone(),
             branches: self.branches.clone(),
             stores: self.stores.clone(),
+            labels: self.labels.clone(),
             next_v: self.next_v,
         }
     }
