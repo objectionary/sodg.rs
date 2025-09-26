@@ -6,9 +6,64 @@ use anyhow::Context as _;
 use log::trace;
 
 use std::convert::TryFrom as _;
+use std::str::FromStr as _;
 
-use crate::{BRANCH_NONE, BRANCH_STATIC, Edge, Persistence, Sodg};
-use crate::{Hex, Label};
+use crate::{BRANCH_NONE, BRANCH_STATIC, Edge, LabelId, Persistence, Sodg, Vertex};
+use crate::{Hex, Label, LabelInterner};
+
+impl<const N: usize> Vertex<N> {
+    fn upsert_edge(&mut self, label_id: LabelId, label: Label, destination: usize) {
+        if let Some(edge) = self.edges.iter_mut().find(|edge| edge.label_id == label_id) {
+            edge.to = destination;
+            edge.label = label;
+        } else {
+            self.edges.push(Edge {
+                label_id,
+                label,
+                to: destination,
+            });
+        }
+    }
+
+    fn update_index(&mut self, label_id: LabelId, destination: u32) {
+        self.index.insert(label_id, destination);
+    }
+
+    #[allow(dead_code)]
+    fn remove_edge(&mut self, label_id: LabelId) -> Option<Edge> {
+        let position = self
+            .edges
+            .iter()
+            .position(|edge| edge.label_id == label_id)?;
+        self.index.remove(label_id);
+        Some(self.edges.remove(position))
+    }
+
+    fn get_destination(&self, label_id: LabelId) -> Option<u32> {
+        self.index.get(label_id)
+    }
+}
+
+impl LabelInterner {
+    fn lookup(&self, label: &Label) -> Option<LabelId> {
+        self.get(label)
+    }
+
+    fn ensure_id(&mut self, label: &Label) -> LabelId {
+        self.get_or_intern(label)
+            .expect("label interner capacity exhausted")
+    }
+}
+
+impl<const N: usize> Sodg<N> {
+    fn encode_vertex_id(vertex: usize) -> u32 {
+        u32::try_from(vertex).expect("vertex identifier exceeds u32 range")
+    }
+
+    fn decode_vertex_id(vertex: u32) -> usize {
+        usize::try_from(vertex).expect("vertex identifier exceeds usize range")
+    }
+}
 
 impl<const N: usize> Sodg<N> {
     /// Add a new vertex `v1` to itself.
@@ -65,20 +120,11 @@ impl<const N: usize> Sodg<N> {
     pub fn bind(&mut self, v1: usize, v2: usize, a: Label) {
         let mut ours = self.vertices.get(v1).unwrap().branch;
         let theirs = self.vertices.get(v2).unwrap().branch;
-        let label_id = self.labels.get_or_intern(&a).unwrap();
-        let destination = u32::try_from(v2).expect("vertex identifier exceeds u32 range");
+        let label_id = self.labels.ensure_id(&a);
+        let destination = Self::encode_vertex_id(v2);
         let vtx1 = self.vertices.get_mut(v1).unwrap();
-        if let Some(edge) = vtx1.edges.iter_mut().find(|edge| edge.label_id == label_id) {
-            edge.to = v2;
-            edge.label = a;
-        } else {
-            vtx1.edges.push(Edge {
-                label_id,
-                label: a,
-                to: v2,
-            });
-        }
-        vtx1.index.insert(label_id, destination);
+        vtx1.upsert_edge(label_id, a, v2);
+        vtx1.update_index(label_id, destination);
         if ours == BRANCH_STATIC {
             if theirs == BRANCH_STATIC {
                 for b in self.branches.iter_mut() {
@@ -245,13 +291,15 @@ impl<const N: usize> Sodg<N> {
     /// If vertex `v1` is absent, `Err` will be returned.
     #[inline]
     pub fn kids(&self, v: usize) -> impl Iterator<Item = (&Label, &usize)> + '_ {
-        self.vertices
+        let vertex = self
+            .vertices
             .get(v)
             .with_context(|| format!("Can't find ν{v} in kids()"))
-            .unwrap()
-            .edges
-            .iter()
-            .map(|edge| (&edge.label, &edge.to))
+            .unwrap();
+        Kids {
+            interner: &self.labels,
+            inner: vertex.edges.iter(),
+        }
     }
 
     /// Find a kid of a vertex, by its edge name, and return the ID of the vertex found.
@@ -275,12 +323,61 @@ impl<const N: usize> Sodg<N> {
     #[must_use]
     #[inline]
     pub fn kid(&self, v: usize, a: Label) -> Option<usize> {
-        let label_id = self.labels.get(&a)?;
+        let label_id = self.labels.lookup(&a)?;
         let vertex = self.vertices.get(v)?;
-        vertex
-            .index
-            .get(label_id)
-            .map(|stored| usize::try_from(stored).expect("vertex identifier exceeds usize range"))
+        let destination = vertex.get_destination(label_id)?;
+        Some(Self::decode_vertex_id(destination))
+    }
+
+    /// Find a vertex by walking the provided locator from `start`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::str::FromStr as _;
+    /// use sodg::{Label, Sodg};
+    /// let mut g : Sodg<16> = Sodg::empty(256);
+    /// g.add(0);
+    /// g.add(1);
+    /// g.add(2);
+    /// g.bind(0, 1, Label::from_str("foo").unwrap());
+    /// g.bind(1, 2, Label::from_str("bar").unwrap());
+    /// assert_eq!(Some(2), g.find(0, "foo.bar"));
+    /// assert_eq!(None, g.find(0, "foo.baz"));
+    /// ```
+    #[must_use]
+    pub fn find(&self, start: usize, locator: &str) -> Option<usize> {
+        if locator.is_empty() {
+            return Some(start);
+        }
+        let mut current = start;
+        for segment in locator.split('.') {
+            if segment.is_empty() {
+                return None;
+            }
+            let label = Label::from_str(segment).ok()?;
+            current = self.kid(current, label)?;
+        }
+        Some(current)
+    }
+}
+
+/// Iterator returned by [`Sodg::kids`] that yields outbound edges and their destinations.
+struct Kids<'a> {
+    interner: &'a LabelInterner,
+    inner: std::slice::Iter<'a, Edge>,
+}
+
+impl<'a> Iterator for Kids<'a> {
+    type Item = (&'a Label, &'a usize);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let edge = self.inner.next()?;
+        #[cfg(debug_assertions)]
+        if let Some(resolved) = self.interner.resolve(edge.label_id) {
+            debug_assert_eq!(resolved, edge.label.to_string());
+        }
+        Some((&edge.label, &edge.to))
     }
 }
 
@@ -435,6 +532,29 @@ mod tests {
     fn gets_kid_from_absent_vertex() {
         let g: Sodg<16> = Sodg::empty(256);
         assert!(g.kid(0, Label::from_str("hello").unwrap()).is_none());
+    }
+
+    #[test]
+    fn finds_vertices_by_locator() {
+        let mut g: Sodg<16> = Sodg::empty(256);
+        g.add(0);
+        g.add(1);
+        g.add(2);
+        g.bind(0, 1, Label::from_str("foo").unwrap());
+        g.bind(1, 2, Label::from_str("bar").unwrap());
+        assert_eq!(Some(2), g.find(0, "foo.bar"));
+        assert_eq!(Some(1), g.find(0, "foo"));
+        assert_eq!(Some(0), g.find(0, ""));
+    }
+
+    #[test]
+    fn find_stops_on_missing_segment() {
+        let mut g: Sodg<16> = Sodg::empty(256);
+        g.add(0);
+        g.add(1);
+        g.bind(0, 1, Label::from_str("foo").unwrap());
+        assert!(g.find(0, "foo.bar").is_none());
+        assert!(g.find(0, "..foo").is_none());
     }
 
     #[test]
