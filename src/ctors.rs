@@ -3,7 +3,9 @@
 
 use emap::Map;
 
-use crate::{EdgeIndex, Hex, LabelInterner, MAX_BRANCHES, Persistence, Sodg, Vertex};
+use crate::{
+    BranchMembers, EdgeIndex, Hex, LabelInterner, MAX_BRANCHES, Persistence, Sodg, Vertex,
+};
 
 impl<const N: usize> Sodg<N> {
     /// Make an empty [`Sodg`], with no vertices and no edges.
@@ -25,12 +27,12 @@ impl<const N: usize> Sodg<N> {
                 },
             ),
             stores: Map::with_capacity_some(MAX_BRANCHES, 0),
-            branches: Map::with_capacity_some(MAX_BRANCHES, microstack::Stack::new()),
+            branches: Map::with_capacity_some(MAX_BRANCHES, BranchMembers::new()),
             labels: LabelInterner::default(),
             next_v: 0,
         };
-        g.branches.insert(0, microstack::Stack::from_vec(vec![0]));
-        g.branches.insert(1, microstack::Stack::from_vec(vec![0]));
+        g.branches.insert(0, BranchMembers::from_vec(vec![0]));
+        g.branches.insert(1, BranchMembers::from_vec(vec![0]));
         g
     }
 }

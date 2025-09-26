@@ -46,6 +46,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
+use smallvec::SmallVec;
 
 mod clone;
 mod ctors;
@@ -71,7 +72,9 @@ pub use edge_index::{Edge, EdgeIndex, SMALL_THRESHOLD};
 
 const HEX_SIZE: usize = 8;
 const MAX_BRANCHES: usize = 16;
-const MAX_BRANCH_SIZE: usize = 16;
+const BRANCH_INLINE_CAPACITY: usize = 16;
+
+type BranchMembers = SmallVec<[usize; BRANCH_INLINE_CAPACITY]>;
 
 /// An object-oriented representation of binary data
 /// in hexadecimal format, which can be put into vertices of the graph.
@@ -152,7 +155,7 @@ pub struct Script {
 #[derive(Serialize, Deserialize)]
 pub struct Sodg<const N: usize> {
     stores: emap::Map<usize>,
-    branches: emap::Map<microstack::Stack<usize, MAX_BRANCH_SIZE>>,
+    branches: emap::Map<BranchMembers>,
     vertices: emap::Map<Vertex<N>>,
     /// Interned labels that back the graph's edge metadata.
     labels: LabelInterner,
