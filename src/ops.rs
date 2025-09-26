@@ -356,27 +356,31 @@ impl<const N: usize> Sodg<N> {
                 Persistence::Empty => {}
             }
         }
-        let cleaned = cleanup_branch.map(|branch| (branch, self.cleanup_branch(branch)));
-        if let Some((branch, removed)) = cleaned
-            && !removed.is_empty()
-        {
-            #[cfg(debug_assertions)]
-            trace!(
-                "#data: branch no.{} destroyed {} vertices as garbage: {}",
-                branch,
-                removed.len(),
-                removed
-                    .iter()
-                    .map(|vertex| format!("ν{vertex}"))
-                    .collect::<Vec<String>>()
-                    .join(", "),
-            );
+        if let Some(branch) = cleanup_branch {
+            let removed = self.cleanup_branch(branch);
+            if !removed.is_empty() {
+                #[cfg(debug_assertions)]
+                trace!(
+                    "#data: branch no.{} destroyed {} vertices as garbage: {}",
+                    branch,
+                    removed.len(),
+                    removed
+                        .iter()
+                        .map(|vertex| format!("ν{vertex}"))
+                        .collect::<Vec<String>>()
+                        .join(", "),
+                );
+            }
         }
         if let Some(retrieval) = retrieved {
             #[cfg(debug_assertions)]
             match retrieval {
                 Retrieval::Fresh => trace!("#data: data of ν{v} retrieved"),
                 Retrieval::Repeat => trace!("#data: data of ν{v} retrieved again"),
+            }
+            #[cfg(not(debug_assertions))]
+            {
+                let _ = retrieval;
             }
         }
         result
@@ -566,6 +570,8 @@ impl<'a> Iterator for Kids<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         let edge = self.inner.next()?;
+        #[cfg(not(debug_assertions))]
+        let _ = &self.interner;
         #[cfg(debug_assertions)]
         if let Some(resolved) = self.interner.resolve(edge.label_id) {
             debug_assert_eq!(resolved, edge.label.to_string());
