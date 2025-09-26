@@ -2,12 +2,11 @@
 // SPDX-License-Identifier: MIT
 
 use std::collections::{HashMap, HashSet};
-use std::convert::TryFrom as _;
 
 use anyhow::{Result, bail};
 use log::debug;
 
-use crate::{Label, Persistence, Sodg};
+use crate::{Persistence, Sodg};
 
 impl<const N: usize> Sodg<N> {
     /// Merge another graph into the current one.
@@ -110,33 +109,38 @@ impl<const N: usize> Sodg<N> {
 
     fn join(&mut self, left: usize, right: usize) {
         for v in self.keys() {
-            let mut updated = self.vertices.get(v).unwrap().clone();
-            let mut changed = false;
-            for edge in &mut updated.edges {
-                if edge.to == right {
-                    edge.to = left;
-                    updated.index.insert(
-                        edge.label_id,
-                        u32::try_from(left).expect("vertex identifier exceeds u32 range"),
-                    );
-                    changed = true;
-                }
-            }
-            if changed {
-                self.vertices.insert(v, updated);
+            let targets = self.vertices.get(v).map_or_else(Vec::new, |vertex| {
+                vertex
+                    .edges
+                    .iter()
+                    .filter(|edge| edge.to == right)
+                    .map(|edge| edge.label_id)
+                    .collect::<Vec<_>>()
+            });
+            for label_id in targets {
+                self.update_edge_destination(v, label_id, left);
             }
         }
         let kids = self
-            .kids(right)
-            .map(|(a, v)| (*a, *v))
-            .collect::<Vec<(Label, usize)>>();
-        for e in kids {
+            .vertices
+            .get(right)
+            .map(|vertex| {
+                vertex
+                    .edges
+                    .iter()
+                    .map(|edge| (edge.label_id, edge.label, edge.to))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        for (label_id, label, destination) in kids {
             assert!(
-                self.kid(left, e.0).is_none(),
+                self.kid(left, label).is_none(),
                 "Can't merge ν{right} into ν{left}, due to conflict in '{}'",
-                e.0,
+                self.labels
+                    .resolve(label_id)
+                    .map_or_else(|| label.to_string(), str::to_owned),
             );
-            self.bind(left, e.1, e.0);
+            self.bind(left, destination, label);
         }
         self.vertices.remove(right);
     }
@@ -147,6 +151,7 @@ mod tests {
     use std::str::FromStr as _;
 
     use super::*;
+    use crate::Label;
 
     #[test]
     fn merges_two_graphs() {

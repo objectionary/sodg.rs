@@ -5,6 +5,7 @@ use anyhow::Context as _;
 #[cfg(debug_assertions)]
 use log::trace;
 
+use std::borrow::Cow;
 use std::convert::TryFrom as _;
 use std::str::FromStr as _;
 
@@ -56,12 +57,37 @@ impl LabelInterner {
 }
 
 impl<const N: usize> Sodg<N> {
+    pub(crate) fn edge_label_text<'a>(&'a self, edge: &'a Edge) -> Cow<'a, str> {
+        self.labels
+            .resolve(edge.label_id)
+            .map_or_else(|| Cow::Owned(edge.label.to_string()), Cow::Borrowed)
+    }
+
     fn encode_vertex_id(vertex: usize) -> u32 {
         u32::try_from(vertex).expect("vertex identifier exceeds u32 range")
     }
 
     fn decode_vertex_id(vertex: u32) -> usize {
         usize::try_from(vertex).expect("vertex identifier exceeds usize range")
+    }
+
+    pub(crate) fn update_edge_destination(
+        &mut self,
+        source: usize,
+        label_id: LabelId,
+        destination: usize,
+    ) {
+        if let Some(vertex) = self.vertices.get_mut(source)
+            && let Some(edge) = vertex
+                .edges
+                .iter_mut()
+                .find(|edge| edge.label_id == label_id)
+        {
+            edge.to = destination;
+            vertex
+                .index
+                .insert(label_id, Self::encode_vertex_id(destination));
+        }
     }
 }
 

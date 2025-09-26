@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 use anyhow::Result;
-use itertools::Itertools as _;
+use itertools::Itertools;
 use xml_builder::{XMLBuilder, XMLElement, XMLVersion};
 
 use crate::{Persistence, Sodg};
@@ -57,10 +57,17 @@ impl<const N: usize> Sodg<N> {
         {
             let mut v_node = XMLElement::new("v");
             v_node.add_attribute("id", v.to_string().as_str());
-            for edge in vtx.edges.iter().sorted_by_key(|edge| edge.label) {
+            let mut edges = vtx
+                .edges
+                .iter()
+                .map(|edge| (self.edge_label_text(edge).into_owned(), edge.to))
+                .collect::<Vec<_>>();
+            edges.sort_by(|left, right| left.0.cmp(&right.0));
+            for (label, destination) in edges {
                 let mut e_node = XMLElement::new("e");
-                e_node.add_attribute("a", edge.label.to_string().as_str());
-                e_node.add_attribute("to", edge.to.to_string().as_str());
+                let to_attr = destination.to_string();
+                e_node.add_attribute("a", label.as_str());
+                e_node.add_attribute("to", to_attr.as_str());
                 v_node.add_child(e_node)?;
             }
             if vtx.persistence != Persistence::Empty {

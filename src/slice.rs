@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: MIT
 
 use std::collections::HashSet;
+use std::str::FromStr as _;
 
-use anyhow::Result;
+use anyhow::{Context as _, Result};
 use log::trace;
 
 use crate::{Label, Sodg};
@@ -29,7 +30,8 @@ impl<const N: usize> Sodg<N> {
     /// Take a slice of the graph, keeping only the vertex specified
     /// by the locator and its kids, recursively found in the entire graph,
     /// but only if the provided predicate agrees with the selection of
-    /// the kids.
+    /// the kids. The predicate receives the parent vertex ID, the destination
+    /// vertex ID, and the canonical label text.
     ///
     /// # Errors
     ///
@@ -38,7 +40,7 @@ impl<const N: usize> Sodg<N> {
     /// # Panics
     ///
     /// If impossible to slice, an error will be returned.
-    pub fn slice_some(&self, v: usize, p: impl Fn(usize, usize, Label) -> bool) -> Result<Self> {
+    pub fn slice_some(&self, v: usize, p: impl Fn(usize, usize, &str) -> bool) -> Result<Self> {
         let mut todo = HashSet::new();
         let mut done = HashSet::new();
         todo.insert(v);
@@ -53,7 +55,8 @@ impl<const N: usize> Sodg<N> {
                     if done.contains(&edge.to) {
                         continue;
                     }
-                    if !p(v, edge.to, edge.label) {
+                    let label = self.edge_label_text(edge);
+                    if !p(v, edge.to, label.as_ref()) {
                         continue;
                     }
                     done.insert(edge.to);
@@ -69,7 +72,10 @@ impl<const N: usize> Sodg<N> {
             for edge in &vtx.edges {
                 if done.contains(&edge.to) {
                     ng.add(edge.to);
-                    ng.bind(v1, edge.to, edge.label);
+                    let label = self.edge_label_text(edge).into_owned();
+                    let parsed = Label::from_str(label.as_str())
+                        .with_context(|| format!("Failed to rebuild label '{label}'"))?;
+                    ng.bind(v1, edge.to, parsed);
                 }
             }
         }
@@ -120,9 +126,7 @@ mod tests {
         g.bind(0, 1, Label::from_str("foo").unwrap());
         g.add(2);
         g.bind(0, 2, Label::from_str("+bar").unwrap());
-        let slice = g
-            .slice_some(0, |_, _, a| !a.to_string().starts_with('+'))
-            .unwrap();
+        let slice = g.slice_some(0, |_, _, a| !a.starts_with('+')).unwrap();
         assert_eq!(2, slice.len());
         assert_eq!(1, slice.kids(0).count());
     }
