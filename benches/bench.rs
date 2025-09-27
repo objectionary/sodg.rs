@@ -56,13 +56,18 @@ fn bench_bind_edges(c: &mut Criterion) {
     for &size in &sizes {
         group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, &size| {
             let mut graph = setup_graph(size);
+            let label = Label::Alpha(0);
+            let label_id = graph
+                .intern_label(&label)
+                .expect("failed to intern benchmark label");
             b.iter(|| {
                 for i in 0..size - 1 {
                     if i % 16 != 0 {
-                        black_box(graph.bind(
+                        black_box(graph.bind_with_label_id(
                             black_box(i),
                             black_box(i + 1),
-                            black_box(Label::Alpha(0)),
+                            black_box(label_id),
+                            black_box(label),
                         ));
                     }
                 }

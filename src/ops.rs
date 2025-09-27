@@ -10,7 +10,7 @@ use std::convert::TryFrom as _;
 use std::str::FromStr as _;
 
 use crate::{BRANCH_NONE, BRANCH_STATIC, Edge, EdgeIndex, LabelId, Persistence, Sodg, Vertex};
-use crate::{Hex, Label, LabelInterner};
+use crate::{Hex, Label, LabelInterner, LabelInternerError};
 
 impl<const N: usize> Vertex<N> {
     fn upsert_edge(&mut self, label_id: LabelId, label: Label, destination: usize) {
@@ -53,22 +53,61 @@ impl<const N: usize> Vertex<N> {
     }
 }
 
-impl LabelInterner {
-    fn lookup(&self, label: &Label) -> Option<LabelId> {
-        self.get(label)
-    }
-
-    fn ensure_id(&mut self, label: &Label) -> LabelId {
-        self.get_or_intern(label)
-            .expect("label interner capacity exhausted")
-    }
-}
-
 impl<const N: usize> Sodg<N> {
     pub(crate) fn edge_label_text<'a>(&'a self, edge: &'a Edge) -> Cow<'a, str> {
         self.labels
             .resolve(edge.label_id)
             .map_or_else(|| Cow::Owned(edge.label.to_string()), Cow::Borrowed)
+    }
+
+    /// Intern the provided [`Label`] within the graph's [`LabelInterner`].
+    ///
+    /// # Errors
+    ///
+    /// Returns the same errors as [`LabelInterner::get_or_intern`], namely
+    /// [`LabelInternerError::CapacityExceeded`] when the identifier space is
+    /// exhausted and [`LabelInternerError::InvalidLabelCharacter`] when the
+    /// label cannot be canonicalized into UTF-8 text.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::str::FromStr as _;
+    /// use sodg::{Label, Sodg};
+    ///
+    /// let mut graph: Sodg<16> = Sodg::empty(16);
+    /// graph.add(0);
+    /// graph.add(1);
+    /// let label = Label::from_str("edge").unwrap();
+    /// let id = graph.intern_label(&label).unwrap();
+    /// graph.bind_with_label_id(0, 1, id, label);
+    /// assert_eq!(Some(1), graph.kid(0, Label::from_str("edge").unwrap()));
+    /// ```
+    pub fn intern_label(&mut self, label: &Label) -> Result<LabelId, LabelInternerError> {
+        self.labels.get_or_intern(label)
+    }
+
+    /// Retrieve the identifier previously assigned to [`label`](Label) without
+    /// mutating the graph.
+    ///
+    /// Returns [`None`] when the label has not been interned yet.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::str::FromStr as _;
+    /// use sodg::{Label, Sodg};
+    ///
+    /// let mut graph: Sodg<16> = Sodg::empty(16);
+    /// graph.add(0);
+    /// graph.add(1);
+    /// let label = Label::from_str("edge").unwrap();
+    /// let id = graph.intern_label(&label).unwrap();
+    /// assert_eq!(Some(id), graph.label_id(&label));
+    /// ```
+    #[must_use]
+    pub fn label_id(&self, label: &Label) -> Option<LabelId> {
+        self.labels.lookup(label)
     }
 
     fn encode_vertex_id(vertex: usize) -> u32 {
@@ -222,12 +261,39 @@ impl<const N: usize> Sodg<N> {
     /// If alerts trigger any error, the error will be returned here.
     #[inline]
     pub fn bind(&mut self, v1: usize, v2: usize, a: Label) {
+        let label_id = self
+            .labels
+            .get_or_intern(&a)
+            .expect("label interner capacity exhausted");
+        self.bind_with_label_id(v1, v2, label_id, a);
+    }
+
+    /// Bind two vertices using an already interned label identifier.
+    ///
+    /// This method skips the label interning step, which allows callers to
+    /// reuse cached [`LabelId`] values gathered via [`Sodg::intern_label`] or
+    /// [`Sodg::label_id`]. It behaves identically to [`bind`](Self::bind)
+    /// otherwise.
+    ///
+    /// # Panics
+    ///
+    /// Propagates the same panics as [`bind`](Self::bind) when the referenced
+    /// vertices are missing or the branches bookkeeping becomes inconsistent.
+    #[inline]
+    pub fn bind_with_label_id(&mut self, v1: usize, v2: usize, label_id: LabelId, label: Label) {
+        self.bind_preinterned(v1, v2, label_id, label);
+    }
+
+    fn bind_preinterned(&mut self, v1: usize, v2: usize, label_id: LabelId, label: Label) {
+        #[cfg(debug_assertions)]
+        if let Some(resolved) = self.labels.resolve(label_id) {
+            debug_assert_eq!(resolved, label.to_string());
+        }
         let mut ours = self.vertices.get(v1).unwrap().branch;
         let theirs = self.vertices.get(v2).unwrap().branch;
-        let label_id = self.labels.ensure_id(&a);
         let destination = Self::encode_vertex_id(v2);
         let vtx1 = self.vertices.get_mut(v1).unwrap();
-        vtx1.upsert_edge(label_id, a, v2);
+        vtx1.upsert_edge(label_id, label, v2);
         vtx1.update_index(label_id, destination);
         if ours == BRANCH_STATIC {
             if theirs == BRANCH_STATIC {
@@ -257,7 +323,7 @@ impl<const N: usize> Sodg<N> {
             "#bind: edge added ν{}(b={}).{} → ν{}(b={})",
             v1,
             self.vertices.get(v1).unwrap().branch,
-            a,
+            label,
             v2,
             self.vertices.get(v2).unwrap().branch,
         );
@@ -798,6 +864,19 @@ mod tests {
         let label = Label::Alpha(SMALL_THRESHOLD);
         let expected = SMALL_THRESHOLD % 2 + 1;
         assert_eq!(Some(expected), g.kid(0, label));
+    }
+
+    #[test]
+    fn bind_with_preinterned_label_id_skips_interner() {
+        let mut g: Sodg<16> = Sodg::empty(16);
+        g.add(0);
+        g.add(1);
+        let label = Label::Alpha(7);
+        assert!(g.label_id(&label).is_none());
+        let label_id = g.intern_label(&label).unwrap();
+        assert_eq!(Some(label_id), g.label_id(&label));
+        g.bind_with_label_id(0, 1, label_id, label);
+        assert_eq!(Some(1), g.kid(0, label));
     }
 
     #[test]
