@@ -165,6 +165,29 @@ impl LabelInterner {
         self.forward.get(&key).copied()
     }
 
+    /// Retrieve the identifier previously assigned to [`label`](Label) without
+    /// mutating the interner.
+    ///
+    /// The method is intentionally equivalent to [`get`](Self::get) but keeps
+    /// semantic clarity when callers specifically need to access a cached
+    /// identifier. It returns [`None`] if the label was not interned yet.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use sodg::{Label, LabelInterner};
+    ///
+    /// let mut interner = LabelInterner::default();
+    /// let label = Label::Alpha(1);
+    /// let id = interner.get_or_intern(&label).unwrap();
+    /// assert_eq!(Some(id), interner.lookup(&label));
+    /// assert!(interner.lookup(&Label::Alpha(99)).is_none());
+    /// ```
+    #[must_use]
+    pub fn lookup(&self, label: &Label) -> Option<LabelId> {
+        self.get(label)
+    }
+
     /// Resolve an identifier into its canonical UTF-8 label.
     ///
     /// # Examples
@@ -399,6 +422,15 @@ mod tests {
         let label = Label::Str(['f', 'o', 'o', ' ', ' ', 'b', 'a', 'r']);
         let key = LabelKey::from_label(&label).unwrap();
         assert_eq!("foobar", key.as_str());
+    }
+
+    #[test]
+    fn lookup_returns_identifier_without_mutation() {
+        let mut interner = LabelInterner::default();
+        let label = Label::Alpha(3);
+        assert!(interner.lookup(&label).is_none());
+        let id = interner.get_or_intern(&label).unwrap();
+        assert_eq!(Some(id), interner.lookup(&label));
     }
 
     #[test]
