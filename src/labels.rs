@@ -10,13 +10,16 @@
 //! API intact while ensuring that external integrations relying on `&str`
 //! semantics continue to operate on stable UTF-8 text identifiers.
 
+use std::borrow::Borrow;
 use std::collections::HashMap;
-use std::fmt::{Display, Formatter, Result as FmtResult, Write as _};
-use std::hash::BuildHasherDefault;
+use std::convert::TryFrom as _;
+use std::fmt::{Display, Formatter, Result as FmtResult};
+use std::hash::{BuildHasherDefault, Hash, Hasher};
+use std::marker::PhantomData;
 
-use arrayvec::ArrayString;
 use rustc_hash::FxHasher;
-use serde::{Deserialize, Serialize};
+use serde::ser::SerializeStruct;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::Label;
 
@@ -28,12 +31,17 @@ pub type LabelId = u32;
 pub enum LabelInternerError {
     /// The number of unique labels exceeded the representable [`LabelId`] range.
     CapacityExceeded,
+    /// The label contains a character that cannot be represented canonically.
+    InvalidLabelCharacter(char),
 }
 
 impl Display for LabelInternerError {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         match self {
             Self::CapacityExceeded => f.write_str("label pool exhausted"),
+            Self::InvalidLabelCharacter(ch) => {
+                write!(f, "label contains unsupported character '{ch}'")
+            }
         }
     }
 }
@@ -68,16 +76,14 @@ impl std::error::Error for LabelInternerError {}
 /// assert_eq!(Some(alpha_id), interner.get(&alpha));
 /// assert_eq!(Some("hello"), interner.resolve(hello_id));
 /// ```
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone)]
 pub struct LabelInterner {
-    forward: HashMap<String, LabelId, BuildHasherDefault<FxHasher>>,
-    reverse: HashMap<LabelId, String, BuildHasherDefault<FxHasher>>,
-    #[serde(default)]
+    forward: HashMap<LabelKey, LabelId, BuildHasherDefault<FxHasher>>,
+    reverse: Vec<Box<str>>,
     next: NextLabelId,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(transparent)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 struct NextLabelId(LabelId);
 
 impl Default for NextLabelId {
@@ -105,6 +111,9 @@ impl LabelInterner {
     /// Returns [`LabelInternerError::CapacityExceeded`] if there is no free
     /// identifier left.
     ///
+    /// Returns [`LabelInternerError::InvalidLabelCharacter`] when the
+    /// corresponding [`Label::Str`] contains a non-ASCII character.
+    ///
     /// # Examples
     ///
     /// ```
@@ -115,14 +124,19 @@ impl LabelInterner {
     /// assert_eq!(Some(id), interner.get(&Label::Alpha(0)));
     /// ```
     pub fn get_or_intern(&mut self, label: &Label) -> Result<LabelId, LabelInternerError> {
-        let key = CanonicalLabel::from_label(label);
-        if let Some(id) = self.forward.get(key.as_str()) {
+        let key = LabelKeyRef::from_label(label)?;
+        if let Some(id) = self.forward.get(&key) {
             return Ok(*id);
         }
         let id = self.next.allocate()?;
         let owned = key.into_owned();
-        self.forward.insert(owned.clone(), id);
-        self.reverse.insert(id, owned);
+        let canonical = key.into_boxed_str();
+        #[cfg(debug_assertions)]
+        if let Ok(index) = usize::try_from(id) {
+            debug_assert_eq!(index.saturating_sub(1), self.reverse.len());
+        }
+        self.forward.insert(owned, id);
+        self.reverse.push(canonical);
         Ok(id)
     }
 
@@ -140,8 +154,10 @@ impl LabelInterner {
     /// ```
     #[must_use]
     pub fn get(&self, label: &Label) -> Option<LabelId> {
-        let key = CanonicalLabel::from_label(label);
-        self.forward.get(key.as_str()).copied()
+        let Ok(key) = LabelKeyRef::from_label(label) else {
+            return None;
+        };
+        self.forward.get(&key).copied()
     }
 
     /// Resolve an identifier into its canonical UTF-8 label.
@@ -160,91 +176,283 @@ impl LabelInterner {
         if id == 0 {
             return None;
         }
-        self.reverse.get(&id).map(String::as_str)
+        let index = usize::try_from(id.saturating_sub(1)).ok()?;
+        self.reverse.get(index).map(Box::as_ref)
+    }
+
+    fn ensure_invariants(&self) -> Result<(), String> {
+        let next = usize::try_from(self.next.0)
+            .map_err(|_| "label identifier exceeds usize range".to_owned())?;
+        if next.saturating_sub(1) != self.reverse.len() {
+            return Err("reverse table length does not match next id".into());
+        }
+        if self.forward.len() != self.reverse.len() {
+            return Err("forward map size does not match reverse table".into());
+        }
+        let mut seen = vec![false; self.reverse.len()];
+        for (key, id) in &self.forward {
+            if *id == 0 {
+                return Err("identifier zero is reserved".into());
+            }
+            let index = usize::try_from(id.saturating_sub(1))
+                .map_err(|_| "label identifier exceeds usize range".to_owned())?;
+            let Some(entry) = self.reverse.get(index) else {
+                return Err("identifier does not have reverse entry".into());
+            };
+            let expected = key.as_ref().canonical_string();
+            if entry.as_ref() != expected {
+                return Err("forward and reverse entries mismatch".into());
+            }
+            seen[index] = true;
+        }
+        if seen.iter().any(|value| !value) {
+            return Err("reverse table contains entries without forward keys".into());
+        }
+        Ok(())
     }
 }
 
-const INLINE_CANONICAL_CAPACITY: usize = 32;
-
-#[derive(Debug, Clone)]
-enum CanonicalLabel {
-    Inline(ArrayString<INLINE_CANONICAL_CAPACITY>),
-    Owned(String),
+impl Serialize for LabelInterner {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        #[cfg(debug_assertions)]
+        self.ensure_invariants()
+            .map_err(serde::ser::Error::custom)?;
+        let mut state = serializer.serialize_struct("LabelInterner", 3)?;
+        state.serialize_field("forward", &self.forward)?;
+        state.serialize_field("reverse", &self.reverse)?;
+        state.serialize_field("next", &self.next)?;
+        state.end()
+    }
 }
 
-impl CanonicalLabel {
-    fn from_label(label: &Label) -> Self {
-        match label {
-            Label::Greek(symbol) => Self::from_char(*symbol),
-            Label::Alpha(index) => Self::from_alpha(*index),
-            Label::Str(chars) => Self::from_char_slice(chars),
+impl<'de> Deserialize<'de> for LabelInterner {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct LabelInternerSerde {
+            forward: HashMap<LabelKey, LabelId, BuildHasherDefault<FxHasher>>,
+            reverse: Vec<Box<str>>,
+            #[serde(default)]
+            next: NextLabelId,
+        }
+
+        let LabelInternerSerde {
+            forward,
+            reverse,
+            next,
+        } = LabelInternerSerde::deserialize(deserializer)?;
+        let interner = Self {
+            forward,
+            reverse,
+            next,
+        };
+        interner
+            .ensure_invariants()
+            .map_err(serde::de::Error::custom)?;
+        Ok(interner)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+enum LabelKeyRepr {
+    Alpha(usize),
+    Greek(char),
+    Str(TrimmedStr),
+}
+
+/// Borrowed view of a canonical label key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct LabelKeyRef<'a> {
+    repr: LabelKeyRepr,
+    _marker: PhantomData<&'a ()>,
+}
+
+impl LabelKeyRef<'_> {
+    const fn from_repr(repr: LabelKeyRepr) -> Self {
+        Self {
+            repr,
+            _marker: PhantomData,
         }
     }
 
-    fn from_char(symbol: char) -> Self {
-        let mut inline = ArrayString::<INLINE_CANONICAL_CAPACITY>::new();
-        match inline.try_push(symbol) {
-            Ok(()) => Self::Inline(inline),
-            Err(_) => Self::Owned(symbol.to_string()),
+    const fn into_owned(self) -> LabelKey {
+        LabelKey::new(self.repr)
+    }
+
+    fn into_boxed_str(self) -> Box<str> {
+        #[cfg(test)]
+        boxed_string_allocations::increment();
+        match self.repr {
+            LabelKeyRepr::Alpha(index) => {
+                let mut text = String::new();
+                text.push('α');
+                text.push_str(&index.to_string());
+                text.into_boxed_str()
+            }
+            LabelKeyRepr::Greek(symbol) => symbol.to_string().into_boxed_str(),
+            LabelKeyRepr::Str(trimmed) => trimmed.into_string().into_boxed_str(),
         }
     }
 
-    fn from_alpha(index: usize) -> Self {
-        let mut inline = ArrayString::<INLINE_CANONICAL_CAPACITY>::new();
-        if inline.try_push('α').is_err() {
-            return Self::Owned(format!("α{index}"));
-        }
-        match write!(&mut inline, "{index}") {
-            Ok(()) => Self::Inline(inline),
-            Err(_) => Self::Owned(format!("α{index}")),
+    fn canonical_string(&self) -> String {
+        match self.repr {
+            LabelKeyRepr::Alpha(index) => {
+                let mut text = String::new();
+                text.push('α');
+                text.push_str(&index.to_string());
+                text
+            }
+            LabelKeyRepr::Greek(symbol) => symbol.to_string(),
+            LabelKeyRepr::Str(trimmed) => trimmed.into_string(),
         }
     }
 
-    fn from_char_slice(chars: &[char; 8]) -> Self {
-        let mut inline = ArrayString::<INLINE_CANONICAL_CAPACITY>::new();
+    #[cfg(test)]
+    const fn repr(&self) -> LabelKeyRepr {
+        self.repr
+    }
+}
+
+impl LabelKeyRef<'static> {
+    fn from_label(label: &Label) -> Result<Self, LabelInternerError> {
+        Ok(Self::from_repr(match label {
+            Label::Greek(symbol) => LabelKeyRepr::Greek(*symbol),
+            Label::Alpha(index) => LabelKeyRepr::Alpha(*index),
+            Label::Str(chars) => LabelKeyRepr::Str(TrimmedStr::from_chars(chars)?),
+        }))
+    }
+}
+
+/// Owned canonical label key used as a hash-map entry.
+#[derive(Debug, Clone, Copy)]
+pub struct LabelKey {
+    repr: LabelKeyRepr,
+    borrowed: LabelKeyRef<'static>,
+}
+
+impl LabelKey {
+    const fn new(repr: LabelKeyRepr) -> Self {
+        Self {
+            repr,
+            borrowed: LabelKeyRef::<'static>::from_repr(repr),
+        }
+    }
+
+    const fn as_ref(&self) -> LabelKeyRef<'_> {
+        LabelKeyRef::from_repr(self.repr)
+    }
+}
+
+impl PartialEq for LabelKey {
+    fn eq(&self, other: &Self) -> bool {
+        self.repr == other.repr
+    }
+}
+
+impl Eq for LabelKey {}
+
+impl Hash for LabelKey {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.repr.hash(state);
+    }
+}
+
+impl Borrow<LabelKeyRef<'static>> for LabelKey {
+    fn borrow(&self) -> &LabelKeyRef<'static> {
+        &self.borrowed
+    }
+}
+
+impl Serialize for LabelKey {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        self.repr.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for LabelKey {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let repr = LabelKeyRepr::deserialize(deserializer)?;
+        Ok(Self::new(repr))
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+struct TrimmedStr {
+    len: u8,
+    data: [u8; 8],
+}
+
+impl TrimmedStr {
+    const fn new() -> Self {
+        Self {
+            len: 0,
+            data: [0; 8],
+        }
+    }
+
+    fn from_chars(chars: &[char; 8]) -> Result<Self, LabelInternerError> {
+        let mut trimmed = Self::new();
         for symbol in chars {
             if *symbol == ' ' {
                 continue;
             }
-            if inline.try_push(*symbol).is_err() {
-                return Self::Owned(chars.iter().filter(|ch| **ch != ' ').collect::<String>());
-            }
+            trimmed.push(*symbol)?;
         }
-        Self::Inline(inline)
+        Ok(trimmed)
     }
 
-    fn as_str(&self) -> &str {
-        match self {
-            Self::Inline(buffer) => buffer.as_str(),
-            Self::Owned(text) => text.as_str(),
+    fn push(&mut self, symbol: char) -> Result<(), LabelInternerError> {
+        if !symbol.is_ascii() {
+            return Err(LabelInternerError::InvalidLabelCharacter(symbol));
         }
+        let index = usize::from(self.len);
+        if index >= self.data.len() {
+            return Err(LabelInternerError::InvalidLabelCharacter(symbol));
+        }
+        self.data[index] = symbol as u8;
+        self.len += 1;
+        Ok(())
     }
 
-    fn into_owned(self) -> String {
-        #[cfg(test)]
-        {
-            CANONICAL_INTO_OWNED.with(|counter| counter.set(counter.get() + 1));
+    fn into_string(self) -> String {
+        let mut text = String::with_capacity(self.len as usize);
+        for byte in &self.data[..usize::from(self.len)] {
+            text.push(char::from(*byte));
         }
-        match self {
-            Self::Inline(buffer) => buffer.as_str().to_owned(),
-            Self::Owned(text) => text,
-        }
+        text
     }
 }
 
 #[cfg(test)]
-thread_local! {
-    static CANONICAL_INTO_OWNED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-}
+mod boxed_string_allocations {
+    use std::cell::Cell;
 
-#[cfg(test)]
-fn reset_canonical_into_owned_counter() {
-    CANONICAL_INTO_OWNED.with(|counter| counter.set(0));
-}
+    thread_local! {
+        static ALLOCATIONS: Cell<usize> = const { Cell::new(0) };
+    }
 
-#[cfg(test)]
-fn canonical_into_owned_calls() -> usize {
-    CANONICAL_INTO_OWNED.with(|counter| counter.get())
+    pub fn increment() {
+        ALLOCATIONS.with(|counter| counter.set(counter.get() + 1));
+    }
+
+    pub fn reset() {
+        ALLOCATIONS.with(|counter| counter.set(0));
+    }
+
+    pub fn total() -> usize {
+        ALLOCATIONS.with(Cell::get)
+    }
 }
 
 #[cfg(test)]
@@ -256,32 +464,26 @@ mod tests {
     use super::*;
 
     #[test]
-    fn canonicalizes_greek_inline() {
+    fn builds_key_for_greek_label() {
         let label = Label::Greek('λ');
-        let canonical = CanonicalLabel::from_label(&label);
-        match canonical {
-            CanonicalLabel::Inline(ref inline) => assert_eq!("λ", inline.as_str()),
-            CanonicalLabel::Owned(_) => panic!("expected inline canonical form"),
-        }
-        assert_eq!("λ", canonical.as_str());
+        let key = LabelKeyRef::from_label(&label).unwrap();
+        assert!(matches!(key.repr(), LabelKeyRepr::Greek('λ')));
+        assert_eq!("λ", key.canonical_string());
     }
 
     #[test]
-    fn canonicalizes_alpha_inline() {
+    fn builds_key_for_alpha_label() {
         let label = Label::Alpha(42);
-        let canonical = CanonicalLabel::from_label(&label);
-        match canonical {
-            CanonicalLabel::Inline(ref inline) => assert_eq!("α42", inline.as_str()),
-            CanonicalLabel::Owned(_) => panic!("expected inline canonical form"),
-        }
-        assert_eq!("α42", canonical.as_str());
+        let key = LabelKeyRef::from_label(&label).unwrap();
+        assert!(matches!(key.repr(), LabelKeyRepr::Alpha(42)));
+        assert_eq!("α42", key.canonical_string());
     }
 
     #[test]
     fn canonicalizes_and_trims_string_labels() {
         let label = Label::Str(['f', 'o', 'o', ' ', ' ', 'b', 'a', 'r']);
-        let canonical = CanonicalLabel::from_label(&label);
-        assert_eq!("foobar", canonical.as_str());
+        let key = LabelKeyRef::from_label(&label).unwrap();
+        assert_eq!("foobar", key.canonical_string());
     }
 
     #[test]
@@ -341,14 +543,14 @@ mod tests {
 
     #[test]
     fn repeated_interning_does_not_reallocate() {
-        reset_canonical_into_owned_counter();
+        boxed_string_allocations::reset();
         let mut interner = LabelInterner::default();
         let label = Label::Alpha(7);
         interner.get_or_intern(&label).unwrap();
-        let after_first = canonical_into_owned_calls();
+        let after_first = boxed_string_allocations::total();
         assert_eq!(1, after_first);
         interner.get_or_intern(&label).unwrap();
-        let after_second = canonical_into_owned_calls();
+        let after_second = boxed_string_allocations::total();
         assert_eq!(after_first, after_second);
     }
 
