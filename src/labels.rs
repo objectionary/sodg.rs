@@ -10,6 +10,7 @@
 //! API intact while ensuring that external integrations relying on `&str`
 //! semantics continue to operate on stable UTF-8 text identifiers.
 
+use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter, Result as FmtResult};
 use std::hash::BuildHasherDefault;
@@ -28,12 +29,17 @@ pub type LabelId = u32;
 pub enum LabelInternerError {
     /// The number of unique labels exceeded the representable [`LabelId`] range.
     CapacityExceeded,
+    /// The label contains a character that cannot be represented canonically.
+    InvalidLabelCharacter(char),
 }
 
 impl Display for LabelInternerError {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         match self {
             Self::CapacityExceeded => f.write_str("label pool exhausted"),
+            Self::InvalidLabelCharacter(ch) => {
+                write!(f, "label contains unsupported character '{ch}'")
+            }
         }
     }
 }
@@ -68,7 +74,7 @@ impl std::error::Error for LabelInternerError {}
 /// assert_eq!(Some(alpha_id), interner.get(&alpha));
 /// assert_eq!(Some("hello"), interner.resolve(hello_id));
 /// ```
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone)]
 pub struct LabelInterner {
     forward: HashMap<LabelKey, LabelId, BuildHasherDefault<FxHasher>>,
     reverse: HashMap<LabelId, String, BuildHasherDefault<FxHasher>>,
@@ -76,8 +82,7 @@ pub struct LabelInterner {
     next: NextLabelId,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(transparent)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 struct NextLabelId(LabelId);
 
 impl Default for NextLabelId {
@@ -104,6 +109,9 @@ impl LabelInterner {
     ///
     /// Returns [`LabelInternerError::CapacityExceeded`] if there is no free
     /// identifier left.
+    ///
+    /// Returns [`LabelInternerError::InvalidLabelCharacter`] when the
+    /// corresponding [`Label::Str`] contains a non-ASCII character.
     ///
     /// # Examples
     ///
@@ -160,7 +168,85 @@ impl LabelInterner {
         if id == 0 {
             return None;
         }
-        self.reverse.get(&id).map(String::as_str)
+        let index = usize::try_from(id.saturating_sub(1)).ok()?;
+        self.reverse.get(index).map(Box::as_ref)
+    }
+
+    fn ensure_invariants(&self) -> Result<(), String> {
+        let next = usize::try_from(self.next.0)
+            .map_err(|_| "label identifier exceeds usize range".to_owned())?;
+        if next.saturating_sub(1) != self.reverse.len() {
+            return Err("reverse table length does not match next id".into());
+        }
+        if self.forward.len() != self.reverse.len() {
+            return Err("forward map size does not match reverse table".into());
+        }
+        let mut seen = vec![false; self.reverse.len()];
+        for (key, id) in &self.forward {
+            if *id == 0 {
+                return Err("identifier zero is reserved".into());
+            }
+            let index = usize::try_from(id.saturating_sub(1))
+                .map_err(|_| "label identifier exceeds usize range".to_owned())?;
+            let Some(entry) = self.reverse.get(index) else {
+                return Err("identifier does not have reverse entry".into());
+            };
+            let expected = key.as_ref().canonical_string();
+            if entry.as_ref() != expected {
+                return Err("forward and reverse entries mismatch".into());
+            }
+            seen[index] = true;
+        }
+        if seen.iter().any(|value| !value) {
+            return Err("reverse table contains entries without forward keys".into());
+        }
+        Ok(())
+    }
+}
+
+impl Serialize for LabelInterner {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        #[cfg(debug_assertions)]
+        self.ensure_invariants()
+            .map_err(serde::ser::Error::custom)?;
+        let mut state = serializer.serialize_struct("LabelInterner", 3)?;
+        state.serialize_field("forward", &self.forward)?;
+        state.serialize_field("reverse", &self.reverse)?;
+        state.serialize_field("next", &self.next)?;
+        state.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for LabelInterner {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct LabelInternerSerde {
+            forward: HashMap<LabelKey, LabelId, BuildHasherDefault<FxHasher>>,
+            reverse: Vec<Box<str>>,
+            #[serde(default)]
+            next: NextLabelId,
+        }
+
+        let LabelInternerSerde {
+            forward,
+            reverse,
+            next,
+        } = LabelInternerSerde::deserialize(deserializer)?;
+        let interner = Self {
+            forward,
+            reverse,
+            next,
+        };
+        interner
+            .ensure_invariants()
+            .map_err(serde::de::Error::custom)?;
+        Ok(interner)
     }
 }
 
@@ -196,6 +282,7 @@ impl LabelKey {
 
     fn from_char_slice(chars: &[char; 8]) -> Self {
         let mut bytes = SmallVec::<[u8; INLINE_LABEL_KEY_CAPACITY]>::new();
+
         for symbol in chars {
             if *symbol == ' ' {
                 continue;
@@ -231,6 +318,9 @@ impl LabelKey {
         for digit in digits[..length].iter().rev() {
             buffer.push(b'0' + *digit);
         }
+        self.data[index] = symbol as u8;
+        self.len += 1;
+        Ok(())
     }
 
     fn clone_into_string(&self) -> String {
@@ -246,6 +336,7 @@ impl LabelKey {
                 String::from_utf8_lossy(&bytes).into_owned()
             }
         }
+        text
     }
 
     #[cfg(test)]
@@ -296,6 +387,7 @@ mod tests {
         let label = Label::Str(['f', 'o', 'o', ' ', ' ', 'b', 'a', 'r']);
         let key = LabelKey::from_label(&label);
         assert_eq!("foobar", key.as_str());
+
     }
 
     #[test]
