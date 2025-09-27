@@ -288,12 +288,7 @@ impl LabelKeyRef<'_> {
         #[cfg(test)]
         boxed_string_allocations::increment();
         match self.repr {
-            LabelKeyRepr::Alpha(index) => {
-                let mut text = String::new();
-                text.push('α');
-                text.push_str(&index.to_string());
-                text.into_boxed_str()
-            }
+            LabelKeyRepr::Alpha(index) => alpha_label_text(index).into_boxed_str(),
             LabelKeyRepr::Greek(symbol) => symbol.to_string().into_boxed_str(),
             LabelKeyRepr::Str(trimmed) => trimmed.into_string().into_boxed_str(),
         }
@@ -301,12 +296,7 @@ impl LabelKeyRef<'_> {
 
     fn canonical_string(&self) -> String {
         match self.repr {
-            LabelKeyRepr::Alpha(index) => {
-                let mut text = String::new();
-                text.push('α');
-                text.push_str(&index.to_string());
-                text
-            }
+            LabelKeyRepr::Alpha(index) => alpha_label_text(index),
             LabelKeyRepr::Greek(symbol) => symbol.to_string(),
             LabelKeyRepr::Str(trimmed) => trimmed.into_string(),
         }
@@ -326,6 +316,15 @@ impl LabelKeyRef<'static> {
             Label::Str(chars) => LabelKeyRepr::Str(TrimmedStr::from_chars(chars)?),
         }))
     }
+}
+
+fn alpha_label_text(index: usize) -> String {
+    let mut buffer = itoa::Buffer::new();
+    let digits = buffer.format(index);
+    let mut text = String::with_capacity(1 + digits.len());
+    text.push('α');
+    text.push_str(digits);
+    text
 }
 
 /// Owned canonical label key used as a hash-map entry.
