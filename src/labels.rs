@@ -11,8 +11,9 @@
 //! semantics continue to operate on stable UTF-8 text identifiers.
 
 use std::collections::HashMap;
-use std::fmt::{Display, Formatter, Result as FmtResult};
+use std::fmt::{Display, Formatter, Result as FmtResult, Write as _};
 
+use arrayvec::ArrayString;
 use serde::{Deserialize, Serialize};
 
 use crate::Label;
@@ -112,13 +113,14 @@ impl LabelInterner {
     /// assert_eq!(Some(id), interner.get(&Label::Alpha(0)));
     /// ```
     pub fn get_or_intern(&mut self, label: &Label) -> Result<LabelId, LabelInternerError> {
-        let key = canonical_form(label);
-        if let Some(id) = self.forward.get(&key) {
+        let key = CanonicalLabel::from_label(label);
+        if let Some(id) = self.forward.get(key.as_str()) {
             return Ok(*id);
         }
         let id = self.next.allocate()?;
-        self.forward.insert(key.clone(), id);
-        self.reverse.insert(id, key);
+        let owned = key.into_owned();
+        self.forward.insert(owned.clone(), id);
+        self.reverse.insert(id, owned);
         Ok(id)
     }
 
@@ -136,8 +138,8 @@ impl LabelInterner {
     /// ```
     #[must_use]
     pub fn get(&self, label: &Label) -> Option<LabelId> {
-        let key = canonical_form(label);
-        self.forward.get(&key).copied()
+        let key = CanonicalLabel::from_label(label);
+        self.forward.get(key.as_str()).copied()
     }
 
     /// Resolve an identifier into its canonical UTF-8 label.
@@ -160,12 +162,87 @@ impl LabelInterner {
     }
 }
 
-fn canonical_form(label: &Label) -> String {
-    match label {
-        Label::Greek(ch) => ch.to_string(),
-        Label::Alpha(idx) => format!("α{idx}"),
-        Label::Str(chars) => chars.iter().filter(|ch| **ch != ' ').collect(),
+const INLINE_CANONICAL_CAPACITY: usize = 32;
+
+#[derive(Debug, Clone)]
+enum CanonicalLabel {
+    Inline(ArrayString<INLINE_CANONICAL_CAPACITY>),
+    Owned(String),
+}
+
+impl CanonicalLabel {
+    fn from_label(label: &Label) -> Self {
+        match label {
+            Label::Greek(symbol) => Self::from_char(*symbol),
+            Label::Alpha(index) => Self::from_alpha(*index),
+            Label::Str(chars) => Self::from_char_slice(chars),
+        }
     }
+
+    fn from_char(symbol: char) -> Self {
+        let mut inline = ArrayString::<INLINE_CANONICAL_CAPACITY>::new();
+        match inline.try_push(symbol) {
+            Ok(()) => Self::Inline(inline),
+            Err(_) => Self::Owned(symbol.to_string()),
+        }
+    }
+
+    fn from_alpha(index: usize) -> Self {
+        let mut inline = ArrayString::<INLINE_CANONICAL_CAPACITY>::new();
+        if inline.try_push('α').is_err() {
+            return Self::Owned(format!("α{index}"));
+        }
+        match write!(&mut inline, "{index}") {
+            Ok(()) => Self::Inline(inline),
+            Err(_) => Self::Owned(format!("α{index}")),
+        }
+    }
+
+    fn from_char_slice(chars: &[char; 8]) -> Self {
+        let mut inline = ArrayString::<INLINE_CANONICAL_CAPACITY>::new();
+        for symbol in chars {
+            if *symbol == ' ' {
+                continue;
+            }
+            if inline.try_push(*symbol).is_err() {
+                return Self::Owned(chars.iter().filter(|ch| **ch != ' ').collect::<String>());
+            }
+        }
+        Self::Inline(inline)
+    }
+
+    fn as_str(&self) -> &str {
+        match self {
+            Self::Inline(buffer) => buffer.as_str(),
+            Self::Owned(text) => text.as_str(),
+        }
+    }
+
+    fn into_owned(self) -> String {
+        #[cfg(test)]
+        {
+            CANONICAL_INTO_OWNED.with(|counter| counter.set(counter.get() + 1));
+        }
+        match self {
+            Self::Inline(buffer) => buffer.as_str().to_owned(),
+            Self::Owned(text) => text,
+        }
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    static CANONICAL_INTO_OWNED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+fn reset_canonical_into_owned_counter() {
+    CANONICAL_INTO_OWNED.with(|counter| counter.set(0));
+}
+
+#[cfg(test)]
+fn canonical_into_owned_calls() -> usize {
+    CANONICAL_INTO_OWNED.with(|counter| counter.get())
 }
 
 #[cfg(test)]
@@ -175,6 +252,35 @@ mod tests {
     use bincode::serde;
 
     use super::*;
+
+    #[test]
+    fn canonicalizes_greek_inline() {
+        let label = Label::Greek('λ');
+        let canonical = CanonicalLabel::from_label(&label);
+        match canonical {
+            CanonicalLabel::Inline(ref inline) => assert_eq!("λ", inline.as_str()),
+            CanonicalLabel::Owned(_) => panic!("expected inline canonical form"),
+        }
+        assert_eq!("λ", canonical.as_str());
+    }
+
+    #[test]
+    fn canonicalizes_alpha_inline() {
+        let label = Label::Alpha(42);
+        let canonical = CanonicalLabel::from_label(&label);
+        match canonical {
+            CanonicalLabel::Inline(ref inline) => assert_eq!("α42", inline.as_str()),
+            CanonicalLabel::Owned(_) => panic!("expected inline canonical form"),
+        }
+        assert_eq!("α42", canonical.as_str());
+    }
+
+    #[test]
+    fn canonicalizes_and_trims_string_labels() {
+        let label = Label::Str(['f', 'o', 'o', ' ', ' ', 'b', 'a', 'r']);
+        let canonical = CanonicalLabel::from_label(&label);
+        assert_eq!("foobar", canonical.as_str());
+    }
 
     #[test]
     fn interns_labels_once() {
@@ -229,6 +335,19 @@ mod tests {
         let first = interner.get_or_intern(&padded).unwrap();
         let second = interner.get_or_intern(&trimmed).unwrap();
         assert_eq!(first, second);
+    }
+
+    #[test]
+    fn repeated_interning_does_not_reallocate() {
+        reset_canonical_into_owned_counter();
+        let mut interner = LabelInterner::default();
+        let label = Label::Alpha(7);
+        interner.get_or_intern(&label).unwrap();
+        let after_first = canonical_into_owned_calls();
+        assert_eq!(1, after_first);
+        interner.get_or_intern(&label).unwrap();
+        let after_second = canonical_into_owned_calls();
+        assert_eq!(after_first, after_second);
     }
 
     #[test]
