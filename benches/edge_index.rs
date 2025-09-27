@@ -68,9 +68,17 @@ declare_usize_benches!(
     edge_index_insert_len,
     {
         edge_index_insert_degree_1 => 1,
+        edge_index_insert_degree_30 => 30,
         edge_index_insert_degree_31 => 31,
         edge_index_insert_degree_32 => 32,
         edge_index_insert_degree_33 => 33,
+        edge_index_insert_degree_34 => 34,
+        edge_index_insert_degree_35 => 35,
+        edge_index_insert_degree_36 => 36,
+        edge_index_insert_degree_37 => 37,
+        edge_index_insert_degree_38 => 38,
+        edge_index_insert_degree_39 => 39,
+        edge_index_insert_degree_40 => 40,
         edge_index_insert_degree_64 => 64,
     }
 );
@@ -80,9 +88,17 @@ declare_usize_benches!(
     edge_index_remove_count,
     {
         edge_index_remove_degree_1 => 1,
+        edge_index_remove_degree_30 => 30,
         edge_index_remove_degree_31 => 31,
         edge_index_remove_degree_32 => 32,
         edge_index_remove_degree_33 => 33,
+        edge_index_remove_degree_34 => 34,
+        edge_index_remove_degree_35 => 35,
+        edge_index_remove_degree_36 => 36,
+        edge_index_remove_degree_37 => 37,
+        edge_index_remove_degree_38 => 38,
+        edge_index_remove_degree_39 => 39,
+        edge_index_remove_degree_40 => 40,
         edge_index_remove_degree_64 => 64,
     }
 );
@@ -92,9 +108,17 @@ declare_usize_benches!(
     edge_index_lookup_count,
     {
         edge_index_lookup_degree_1 => 1,
+        edge_index_lookup_degree_30 => 30,
         edge_index_lookup_degree_31 => 31,
         edge_index_lookup_degree_32 => 32,
         edge_index_lookup_degree_33 => 33,
+        edge_index_lookup_degree_34 => 34,
+        edge_index_lookup_degree_35 => 35,
+        edge_index_lookup_degree_36 => 36,
+        edge_index_lookup_degree_37 => 37,
+        edge_index_lookup_degree_38 => 38,
+        edge_index_lookup_degree_39 => 39,
+        edge_index_lookup_degree_40 => 40,
         edge_index_lookup_degree_64 => 64,
     }
 );
@@ -104,9 +128,17 @@ declare_option_benches!(
     find_locator_hit,
     {
         find_multi_segment_degree_1 => 1,
+        find_multi_segment_degree_30 => 30,
         find_multi_segment_degree_31 => 31,
         find_multi_segment_degree_32 => 32,
         find_multi_segment_degree_33 => 33,
+        find_multi_segment_degree_34 => 34,
+        find_multi_segment_degree_35 => 35,
+        find_multi_segment_degree_36 => 36,
+        find_multi_segment_degree_37 => 37,
+        find_multi_segment_degree_38 => 38,
+        find_multi_segment_degree_39 => 39,
+        find_multi_segment_degree_40 => 40,
         find_multi_segment_degree_64 => 64,
     }
 );
@@ -116,9 +148,17 @@ library_benchmark_group!(
     name = edge_index_insert_group;
     benchmarks =
         edge_index_insert_degree_1,
+        edge_index_insert_degree_30,
         edge_index_insert_degree_31,
         edge_index_insert_degree_32,
         edge_index_insert_degree_33,
+        edge_index_insert_degree_34,
+        edge_index_insert_degree_35,
+        edge_index_insert_degree_36,
+        edge_index_insert_degree_37,
+        edge_index_insert_degree_38,
+        edge_index_insert_degree_39,
+        edge_index_insert_degree_40,
         edge_index_insert_degree_64,
 );
 
@@ -127,9 +167,17 @@ library_benchmark_group!(
     name = edge_index_remove_group;
     benchmarks =
         edge_index_remove_degree_1,
+        edge_index_remove_degree_30,
         edge_index_remove_degree_31,
         edge_index_remove_degree_32,
         edge_index_remove_degree_33,
+        edge_index_remove_degree_34,
+        edge_index_remove_degree_35,
+        edge_index_remove_degree_36,
+        edge_index_remove_degree_37,
+        edge_index_remove_degree_38,
+        edge_index_remove_degree_39,
+        edge_index_remove_degree_40,
         edge_index_remove_degree_64,
 );
 
@@ -138,9 +186,17 @@ library_benchmark_group!(
     name = edge_index_lookup_group;
     benchmarks =
         edge_index_lookup_degree_1,
+        edge_index_lookup_degree_30,
         edge_index_lookup_degree_31,
         edge_index_lookup_degree_32,
         edge_index_lookup_degree_33,
+        edge_index_lookup_degree_34,
+        edge_index_lookup_degree_35,
+        edge_index_lookup_degree_36,
+        edge_index_lookup_degree_37,
+        edge_index_lookup_degree_38,
+        edge_index_lookup_degree_39,
+        edge_index_lookup_degree_40,
         edge_index_lookup_degree_64,
 );
 
@@ -149,9 +205,17 @@ library_benchmark_group!(
     name = find_multi_segment_group;
     benchmarks =
         find_multi_segment_degree_1,
+        find_multi_segment_degree_30,
         find_multi_segment_degree_31,
         find_multi_segment_degree_32,
         find_multi_segment_degree_33,
+        find_multi_segment_degree_34,
+        find_multi_segment_degree_35,
+        find_multi_segment_degree_36,
+        find_multi_segment_degree_37,
+        find_multi_segment_degree_38,
+        find_multi_segment_degree_39,
+        find_multi_segment_degree_40,
         find_multi_segment_degree_64,
 );
 
