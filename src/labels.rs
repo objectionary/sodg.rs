@@ -250,12 +250,80 @@ impl<'de> Deserialize<'de> for LabelInterner {
     }
 }
 
-const INLINE_LABEL_KEY_CAPACITY: usize = 32;
-const MAX_USIZE_DECIMAL_DIGITS: usize = 39;
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+enum LabelKeyRepr {
+    Alpha(usize),
+    Greek(char),
+    Str(TrimmedStr),
+}
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-struct LabelKey {
-    bytes: SmallVec<[u8; INLINE_LABEL_KEY_CAPACITY]>,
+/// Borrowed view of a canonical label key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct LabelKeyRef<'a> {
+    repr: LabelKeyRepr,
+    _marker: PhantomData<&'a ()>,
+}
+
+impl LabelKeyRef<'_> {
+    const fn from_repr(repr: LabelKeyRepr) -> Self {
+        Self {
+            repr,
+            _marker: PhantomData,
+        }
+    }
+
+    const fn into_owned(self) -> LabelKey {
+        LabelKey::new(self.repr)
+    }
+
+    fn into_boxed_str(self) -> Box<str> {
+        #[cfg(test)]
+        boxed_string_allocations::increment();
+        match self.repr {
+            LabelKeyRepr::Alpha(index) => alpha_label_text(index).into_boxed_str(),
+            LabelKeyRepr::Greek(symbol) => symbol.to_string().into_boxed_str(),
+            LabelKeyRepr::Str(trimmed) => trimmed.into_string().into_boxed_str(),
+        }
+    }
+
+    fn canonical_string(&self) -> String {
+        match self.repr {
+            LabelKeyRepr::Alpha(index) => alpha_label_text(index),
+            LabelKeyRepr::Greek(symbol) => symbol.to_string(),
+            LabelKeyRepr::Str(trimmed) => trimmed.into_string(),
+        }
+    }
+
+    #[cfg(test)]
+    const fn repr(&self) -> LabelKeyRepr {
+        self.repr
+    }
+}
+
+impl LabelKeyRef<'static> {
+    fn from_label(label: &Label) -> Result<Self, LabelInternerError> {
+        Ok(Self::from_repr(match label {
+            Label::Greek(symbol) => LabelKeyRepr::Greek(*symbol),
+            Label::Alpha(index) => LabelKeyRepr::Alpha(*index),
+            Label::Str(chars) => LabelKeyRepr::Str(TrimmedStr::from_chars(chars)?),
+        }))
+    }
+}
+
+fn alpha_label_text(index: usize) -> String {
+    let mut buffer = itoa::Buffer::new();
+    let digits = buffer.format(index);
+    let mut text = String::with_capacity(1 + digits.len());
+    text.push('α');
+    text.push_str(digits);
+    text
+}
+
+/// Owned canonical label key used as a hash-map entry.
+#[derive(Debug, Clone, Copy)]
+pub struct LabelKey {
+    repr: LabelKeyRepr,
+    borrowed: LabelKeyRef<'static>,
 }
 
 impl LabelKey {

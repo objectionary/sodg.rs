@@ -1087,6 +1087,7 @@ dependencies = [
  "hex",
  "iai-callgrind",
  "itertools 0.14.0",
+ "itoa",
  "lazy_static",
  "libc",
  "log",
