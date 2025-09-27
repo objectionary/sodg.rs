@@ -23,6 +23,10 @@ adaptive mapping from interned label identifiers to destination vertex ids.
 * **Promotion cost:** The first insertion beyond the small-map threshold walks
   the entire map to populate the `HashMap`. Benchmarks show this one-time cost is
   more than offset by faster lookups in the dense regime.
+* **Growth-aware promotion:** Promotion allocates the destination `HashMap`
+  using a doubling growth factor and eagerly reserves for the next expansion to
+  smoothen allocations across the 30–40 degree window. Callers should expect the
+  amortized cost of inserts to stay nearly flat after the first promotion.
 * **Two sources of truth:** The vertex keeps the `Vec<Edge>` as the canonical
   record while the index mirrors it. Tests assert that rebuilds and removals keep
   the two data structures synchronized.

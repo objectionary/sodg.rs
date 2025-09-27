@@ -133,11 +133,19 @@ impl EdgeIndex {
         match self {
             Self::Small(map) => {
                 if map.len() == SMALL_THRESHOLD && map.get(&label).is_none() {
-                    let mut promoted = HashMap::with_capacity(map.len() + 1);
+                    let current_len = map.len();
+                    let expected_capacity = current_len
+                        .saturating_mul(2)
+                        .max(current_len.saturating_add(1));
+                    let mut promoted = HashMap::with_capacity(expected_capacity);
                     for (stored_label, stored_vertex) in map.iter() {
                         promoted.insert(*stored_label, *stored_vertex);
                     }
                     promoted.insert(label, vertex);
+                    let remaining_capacity = expected_capacity.saturating_sub(promoted.len());
+                    if remaining_capacity > 0 {
+                        let _ = promoted.try_reserve(remaining_capacity);
+                    }
                     *self = Self::Large(promoted);
                     None
                 } else {
@@ -205,5 +213,46 @@ mod tests {
         assert!(matches!(index, EdgeIndex::Large(_)));
         assert_eq!(Some(2), index.remove(1));
         assert_eq!(None, index.get(1));
+    }
+
+    #[test]
+    fn maintains_correct_representation_around_promotion_boundary() {
+        for degree in 30..=40 {
+            let mut index = EdgeIndex::new();
+            let degree_u32 = u32::try_from(degree).expect("degree fits into u32");
+            for label in 0..degree_u32 {
+                index.insert(label, label + 1);
+            }
+            if degree <= SMALL_THRESHOLD {
+                assert!(
+                    matches!(index, EdgeIndex::Small(_)),
+                    "degree {degree} should stay small"
+                );
+            } else {
+                assert!(
+                    matches!(index, EdgeIndex::Large(_)),
+                    "degree {degree} should promote"
+                );
+            }
+            for label in 0..degree_u32 {
+                assert_eq!(Some(label + 1), index.get(label));
+            }
+        }
+    }
+
+    #[test]
+    fn continues_to_accept_inserts_after_promotion() {
+        let mut index = EdgeIndex::new();
+        let threshold = u32::try_from(SMALL_THRESHOLD).expect("SMALL_THRESHOLD fits into u32");
+        for label in 0..=threshold {
+            index.insert(label, label + 1);
+        }
+        assert!(matches!(index, EdgeIndex::Large(_)));
+        for label in (threshold + 1)..(threshold + 40) {
+            index.insert(label, label + 1);
+        }
+        for label in 0..(threshold + 40) {
+            assert_eq!(Some(label + 1), index.get(label));
+        }
     }
 }
