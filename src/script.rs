@@ -146,12 +146,16 @@ impl Script {
     fn parse<const N: usize>(&mut self, s: &str, g: &mut Sodg<N>) -> Result<usize> {
         let head = s.chars().next().context("Empty identifier")?;
         if head == '$' || head == 'ν' {
-            let tail: String = s.chars().skip(1).collect::<Vec<_>>().into_iter().collect();
+            let tail = s
+                .get(head.len_utf8()..)
+                .context("Identifier is missing a numeric suffix")?;
             if head == '$' {
-                Ok(*self.vars.entry(tail).or_insert_with(|| g.next_id()))
+                Ok(*self
+                    .vars
+                    .entry(tail.to_owned())
+                    .or_insert_with(|| g.next_id()))
             } else {
-                Ok(usize::from_str(tail.as_str())
-                    .with_context(|| format!("Parsing of '{s}' failed"))?)
+                Ok(usize::from_str(tail).with_context(|| format!("Parsing of '{s}' failed"))?)
             }
         } else {
             let v = usize::from_str(s).with_context(|| format!("Parsing of '{s}' failed"))?;
