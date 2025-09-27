@@ -16,7 +16,7 @@ use std::hint::black_box;
 
 use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group, criterion_main};
 
-use sodg::{EdgeIndex, Hex, Label, Sodg};
+use sodg::{EdgeIndex, Hex, Label, LabelInterner, Sodg};
 
 mod bench_utils;
 
@@ -70,6 +70,30 @@ fn bench_bind_edges(c: &mut Criterion) {
             });
         });
     }
+    group.finish();
+}
+
+fn bench_label_interner_reuse(c: &mut Criterion) {
+    let mut group = c.benchmark_group("label_interner_reuse");
+    let label = Label::Alpha(7);
+    group.bench_function("reuse_alpha", |b| {
+        b.iter_batched(
+            || {
+                let mut interner = LabelInterner::default();
+                interner.get_or_intern(&label).unwrap();
+                interner
+            },
+            |mut interner| {
+                for _ in 0..128 {
+                    black_box(interner.get(&label));
+                }
+                for _ in 0..128 {
+                    black_box(interner.get_or_intern(&label).unwrap());
+                }
+            },
+            BatchSize::SmallInput,
+        );
+    });
     group.finish();
 }
 
@@ -206,5 +230,6 @@ criterion_group!(
         bench_edge_index_removals,
         bench_edge_index_lookups,
         bench_find_multi_segment,
+        bench_label_interner_reuse,
 );
 criterion_main!(benches);
