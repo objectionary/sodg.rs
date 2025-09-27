@@ -12,14 +12,12 @@
 
 use std::borrow::Borrow;
 use std::collections::HashMap;
-use std::convert::TryFrom as _;
 use std::fmt::{Display, Formatter, Result as FmtResult};
-use std::hash::{BuildHasherDefault, Hash, Hasher};
-use std::marker::PhantomData;
+use std::hash::BuildHasherDefault;
 
 use rustc_hash::FxHasher;
-use serde::ser::SerializeStruct;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Serialize};
+use smallvec::SmallVec;
 
 use crate::Label;
 
@@ -79,7 +77,8 @@ impl std::error::Error for LabelInternerError {}
 #[derive(Debug, Default, Clone)]
 pub struct LabelInterner {
     forward: HashMap<LabelKey, LabelId, BuildHasherDefault<FxHasher>>,
-    reverse: Vec<Box<str>>,
+    reverse: HashMap<LabelId, String, BuildHasherDefault<FxHasher>>,
+    #[serde(default)]
     next: NextLabelId,
 }
 
@@ -124,19 +123,14 @@ impl LabelInterner {
     /// assert_eq!(Some(id), interner.get(&Label::Alpha(0)));
     /// ```
     pub fn get_or_intern(&mut self, label: &Label) -> Result<LabelId, LabelInternerError> {
-        let key = LabelKeyRef::from_label(label)?;
+        let key = LabelKey::from_label(label);
         if let Some(id) = self.forward.get(&key) {
             return Ok(*id);
         }
         let id = self.next.allocate()?;
-        let owned = key.into_owned();
-        let canonical = key.into_boxed_str();
-        #[cfg(debug_assertions)]
-        if let Ok(index) = usize::try_from(id) {
-            debug_assert_eq!(index.saturating_sub(1), self.reverse.len());
-        }
-        self.forward.insert(owned, id);
-        self.reverse.push(canonical);
+        let owned = key.clone_into_string();
+        self.forward.insert(key, id);
+        self.reverse.insert(id, owned);
         Ok(id)
     }
 
@@ -154,9 +148,7 @@ impl LabelInterner {
     /// ```
     #[must_use]
     pub fn get(&self, label: &Label) -> Option<LabelId> {
-        let Ok(key) = LabelKeyRef::from_label(label) else {
-            return None;
-        };
+        let key = LabelKey::from_label(label);
         self.forward.get(&key).copied()
     }
 
@@ -258,201 +250,114 @@ impl<'de> Deserialize<'de> for LabelInterner {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-enum LabelKeyRepr {
-    Alpha(usize),
-    Greek(char),
-    Str(TrimmedStr),
-}
+const INLINE_LABEL_KEY_CAPACITY: usize = 32;
+const MAX_USIZE_DECIMAL_DIGITS: usize = 39;
 
-/// Borrowed view of a canonical label key.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct LabelKeyRef<'a> {
-    repr: LabelKeyRepr,
-    _marker: PhantomData<&'a ()>,
-}
-
-impl LabelKeyRef<'_> {
-    const fn from_repr(repr: LabelKeyRepr) -> Self {
-        Self {
-            repr,
-            _marker: PhantomData,
-        }
-    }
-
-    const fn into_owned(self) -> LabelKey {
-        LabelKey::new(self.repr)
-    }
-
-    fn into_boxed_str(self) -> Box<str> {
-        #[cfg(test)]
-        boxed_string_allocations::increment();
-        match self.repr {
-            LabelKeyRepr::Alpha(index) => {
-                let mut text = String::new();
-                text.push('α');
-                text.push_str(&index.to_string());
-                text.into_boxed_str()
-            }
-            LabelKeyRepr::Greek(symbol) => symbol.to_string().into_boxed_str(),
-            LabelKeyRepr::Str(trimmed) => trimmed.into_string().into_boxed_str(),
-        }
-    }
-
-    fn canonical_string(&self) -> String {
-        match self.repr {
-            LabelKeyRepr::Alpha(index) => {
-                let mut text = String::new();
-                text.push('α');
-                text.push_str(&index.to_string());
-                text
-            }
-            LabelKeyRepr::Greek(symbol) => symbol.to_string(),
-            LabelKeyRepr::Str(trimmed) => trimmed.into_string(),
-        }
-    }
-
-    #[cfg(test)]
-    const fn repr(&self) -> LabelKeyRepr {
-        self.repr
-    }
-}
-
-impl LabelKeyRef<'static> {
-    fn from_label(label: &Label) -> Result<Self, LabelInternerError> {
-        Ok(Self::from_repr(match label {
-            Label::Greek(symbol) => LabelKeyRepr::Greek(*symbol),
-            Label::Alpha(index) => LabelKeyRepr::Alpha(*index),
-            Label::Str(chars) => LabelKeyRepr::Str(TrimmedStr::from_chars(chars)?),
-        }))
-    }
-}
-
-/// Owned canonical label key used as a hash-map entry.
-#[derive(Debug, Clone, Copy)]
-pub struct LabelKey {
-    repr: LabelKeyRepr,
-    borrowed: LabelKeyRef<'static>,
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+struct LabelKey {
+    bytes: SmallVec<[u8; INLINE_LABEL_KEY_CAPACITY]>,
 }
 
 impl LabelKey {
-    const fn new(repr: LabelKeyRepr) -> Self {
-        Self {
-            repr,
-            borrowed: LabelKeyRef::<'static>::from_repr(repr),
+    fn from_label(label: &Label) -> Self {
+        match label {
+            Label::Greek(symbol) => Self::from_char(*symbol),
+            Label::Alpha(index) => Self::from_alpha(*index),
+            Label::Str(chars) => Self::from_char_slice(chars),
         }
     }
 
-    const fn as_ref(&self) -> LabelKeyRef<'_> {
-        LabelKeyRef::from_repr(self.repr)
-    }
-}
-
-impl PartialEq for LabelKey {
-    fn eq(&self, other: &Self) -> bool {
-        self.repr == other.repr
-    }
-}
-
-impl Eq for LabelKey {}
-
-impl Hash for LabelKey {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.repr.hash(state);
-    }
-}
-
-impl Borrow<LabelKeyRef<'static>> for LabelKey {
-    fn borrow(&self) -> &LabelKeyRef<'static> {
-        &self.borrowed
-    }
-}
-
-impl Serialize for LabelKey {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        self.repr.serialize(serializer)
-    }
-}
-
-impl<'de> Deserialize<'de> for LabelKey {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let repr = LabelKeyRepr::deserialize(deserializer)?;
-        Ok(Self::new(repr))
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-struct TrimmedStr {
-    len: u8,
-    data: [u8; 8],
-}
-
-impl TrimmedStr {
-    const fn new() -> Self {
-        Self {
-            len: 0,
-            data: [0; 8],
-        }
+    fn from_char(symbol: char) -> Self {
+        let mut bytes = SmallVec::<[u8; INLINE_LABEL_KEY_CAPACITY]>::new();
+        Self::push_char(&mut bytes, symbol);
+        Self { bytes }
     }
 
-    fn from_chars(chars: &[char; 8]) -> Result<Self, LabelInternerError> {
-        let mut trimmed = Self::new();
+    fn from_alpha(index: usize) -> Self {
+        let mut bytes = SmallVec::<[u8; INLINE_LABEL_KEY_CAPACITY]>::new();
+        Self::push_char(&mut bytes, 'α');
+        Self::push_usize(&mut bytes, index);
+        Self { bytes }
+    }
+
+    fn from_char_slice(chars: &[char; 8]) -> Self {
+        let mut bytes = SmallVec::<[u8; INLINE_LABEL_KEY_CAPACITY]>::new();
+
         for symbol in chars {
             if *symbol == ' ' {
                 continue;
             }
-            trimmed.push(*symbol)?;
+            Self::push_char(&mut bytes, *symbol);
         }
-        Ok(trimmed)
+        Self { bytes }
     }
 
-    fn push(&mut self, symbol: char) -> Result<(), LabelInternerError> {
-        if !symbol.is_ascii() {
-            return Err(LabelInternerError::InvalidLabelCharacter(symbol));
+    fn push_char(buffer: &mut SmallVec<[u8; INLINE_LABEL_KEY_CAPACITY]>, symbol: char) {
+        let mut encoded = [0_u8; 4];
+        let encoded = symbol.encode_utf8(&mut encoded);
+        buffer.extend_from_slice(encoded.as_bytes());
+    }
+
+    fn push_usize(buffer: &mut SmallVec<[u8; INLINE_LABEL_KEY_CAPACITY]>, mut value: usize) {
+        if value == 0 {
+            buffer.push(b'0');
+            return;
         }
-        let index = usize::from(self.len);
-        if index >= self.data.len() {
-            return Err(LabelInternerError::InvalidLabelCharacter(symbol));
+        let mut digits = [0_u8; MAX_USIZE_DECIMAL_DIGITS];
+        let mut length = 0;
+        while value > 0 {
+            let remainder = value % 10;
+            let digit = u8::try_from(remainder).unwrap_or_else(|_| {
+                debug_assert!(false, "label digits must fit into a single byte");
+                0
+            });
+            digits[length] = digit;
+            length += 1;
+            value /= 10;
+        }
+        for digit in digits[..length].iter().rev() {
+            buffer.push(b'0' + *digit);
         }
         self.data[index] = symbol as u8;
         self.len += 1;
         Ok(())
     }
 
-    fn into_string(self) -> String {
-        let mut text = String::with_capacity(self.len as usize);
-        for byte in &self.data[..usize::from(self.len)] {
-            text.push(char::from(*byte));
+    fn clone_into_string(&self) -> String {
+        #[cfg(test)]
+        {
+            LABEL_KEY_CLONE_CALLS.with(|counter| counter.set(counter.get() + 1));
+        }
+        match String::from_utf8(self.bytes.clone().into_vec()) {
+            Ok(text) => text,
+            Err(error) => {
+                debug_assert!(false, "label keys must remain valid UTF-8");
+                let bytes = error.into_bytes();
+                String::from_utf8_lossy(&bytes).into_owned()
+            }
         }
         text
+    }
+
+    #[cfg(test)]
+    fn as_str(&self) -> &str {
+        std::str::from_utf8(&self.bytes).expect("label keys must remain valid UTF-8")
     }
 }
 
 #[cfg(test)]
-mod boxed_string_allocations {
-    use std::cell::Cell;
+thread_local! {
+    static LABEL_KEY_CLONE_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
 
-    thread_local! {
-        static ALLOCATIONS: Cell<usize> = const { Cell::new(0) };
-    }
+#[cfg(test)]
+fn reset_label_key_clone_counter() {
+    LABEL_KEY_CLONE_CALLS.with(|counter| counter.set(0));
+}
 
-    pub fn increment() {
-        ALLOCATIONS.with(|counter| counter.set(counter.get() + 1));
-    }
-
-    pub fn reset() {
-        ALLOCATIONS.with(|counter| counter.set(0));
-    }
-
-    pub fn total() -> usize {
-        ALLOCATIONS.with(Cell::get)
-    }
+#[cfg(test)]
+fn label_key_clone_calls() -> usize {
+    LABEL_KEY_CLONE_CALLS.with(|counter| counter.get())
 }
 
 #[cfg(test)]
@@ -464,26 +369,25 @@ mod tests {
     use super::*;
 
     #[test]
-    fn builds_key_for_greek_label() {
+    fn builds_greek_label_key() {
         let label = Label::Greek('λ');
-        let key = LabelKeyRef::from_label(&label).unwrap();
-        assert!(matches!(key.repr(), LabelKeyRepr::Greek('λ')));
-        assert_eq!("λ", key.canonical_string());
+        let key = LabelKey::from_label(&label);
+        assert_eq!("λ", key.as_str());
     }
 
     #[test]
-    fn builds_key_for_alpha_label() {
+    fn builds_alpha_label_key() {
         let label = Label::Alpha(42);
-        let key = LabelKeyRef::from_label(&label).unwrap();
-        assert!(matches!(key.repr(), LabelKeyRepr::Alpha(42)));
-        assert_eq!("α42", key.canonical_string());
+        let key = LabelKey::from_label(&label);
+        assert_eq!("α42", key.as_str());
     }
 
     #[test]
-    fn canonicalizes_and_trims_string_labels() {
+    fn trims_string_labels_in_key() {
         let label = Label::Str(['f', 'o', 'o', ' ', ' ', 'b', 'a', 'r']);
-        let key = LabelKeyRef::from_label(&label).unwrap();
-        assert_eq!("foobar", key.canonical_string());
+        let key = LabelKey::from_label(&label);
+        assert_eq!("foobar", key.as_str());
+
     }
 
     #[test]
@@ -543,14 +447,14 @@ mod tests {
 
     #[test]
     fn repeated_interning_does_not_reallocate() {
-        boxed_string_allocations::reset();
+        reset_label_key_clone_counter();
         let mut interner = LabelInterner::default();
         let label = Label::Alpha(7);
         interner.get_or_intern(&label).unwrap();
-        let after_first = boxed_string_allocations::total();
+        let after_first = label_key_clone_calls();
         assert_eq!(1, after_first);
         interner.get_or_intern(&label).unwrap();
-        let after_second = boxed_string_allocations::total();
+        let after_second = label_key_clone_calls();
         assert_eq!(after_first, after_second);
     }
 
