@@ -12,8 +12,10 @@
 
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter, Result as FmtResult, Write as _};
+use std::hash::BuildHasherDefault;
 
 use arrayvec::ArrayString;
+use rustc_hash::FxHasher;
 use serde::{Deserialize, Serialize};
 
 use crate::Label;
@@ -68,8 +70,8 @@ impl std::error::Error for LabelInternerError {}
 /// ```
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct LabelInterner {
-    forward: HashMap<String, LabelId>,
-    reverse: HashMap<LabelId, String>,
+    forward: HashMap<String, LabelId, BuildHasherDefault<FxHasher>>,
+    reverse: HashMap<LabelId, String, BuildHasherDefault<FxHasher>>,
     #[serde(default)]
     next: NextLabelId,
 }
