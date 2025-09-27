@@ -10,13 +10,13 @@
 //! API intact while ensuring that external integrations relying on `&str`
 //! semantics continue to operate on stable UTF-8 text identifiers.
 
-use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter, Result as FmtResult};
 use std::hash::BuildHasherDefault;
+use std::str::Utf8Error;
 
 use rustc_hash::FxHasher;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer, ser::SerializeStruct};
 use smallvec::SmallVec;
 
 use crate::Label;
@@ -77,8 +77,7 @@ impl std::error::Error for LabelInternerError {}
 #[derive(Debug, Default, Clone)]
 pub struct LabelInterner {
     forward: HashMap<LabelKey, LabelId, BuildHasherDefault<FxHasher>>,
-    reverse: HashMap<LabelId, String, BuildHasherDefault<FxHasher>>,
-    #[serde(default)]
+    reverse: Vec<Box<str>>,
     next: NextLabelId,
 }
 
@@ -123,14 +122,25 @@ impl LabelInterner {
     /// assert_eq!(Some(id), interner.get(&Label::Alpha(0)));
     /// ```
     pub fn get_or_intern(&mut self, label: &Label) -> Result<LabelId, LabelInternerError> {
-        let key = LabelKey::from_label(label);
-        if let Some(id) = self.forward.get(&key) {
-            return Ok(*id);
+        let key = LabelKey::from_label(label)?;
+        if let Some(id) = self.forward.get(&key).copied() {
+            return Ok(id);
         }
+        let owned = key.clone_into_boxed_str();
         let id = self.next.allocate()?;
-        let owned = key.clone_into_string();
+        let offset = id
+            .checked_sub(1)
+            .ok_or(LabelInternerError::CapacityExceeded)?;
+        let index = usize::try_from(offset).map_err(|_| LabelInternerError::CapacityExceeded)?;
+        if self.reverse.len() != index {
+            debug_assert!(
+                false,
+                "reverse table length must equal next identifier offset"
+            );
+            return Err(LabelInternerError::CapacityExceeded);
+        }
+        self.reverse.push(owned);
         self.forward.insert(key, id);
-        self.reverse.insert(id, owned);
         Ok(id)
     }
 
@@ -148,7 +158,7 @@ impl LabelInterner {
     /// ```
     #[must_use]
     pub fn get(&self, label: &Label) -> Option<LabelId> {
-        let key = LabelKey::from_label(label);
+        let key = LabelKey::from_label(label).ok()?;
         self.forward.get(&key).copied()
     }
 
@@ -164,17 +174,22 @@ impl LabelInterner {
     /// assert_eq!(Some("α2"), interner.resolve(id));
     /// assert_eq!(None, interner.resolve(0));
     /// ```
+    #[must_use]
     pub fn resolve(&self, id: LabelId) -> Option<&str> {
         if id == 0 {
             return None;
         }
-        let index = usize::try_from(id.saturating_sub(1)).ok()?;
-        self.reverse.get(index).map(Box::as_ref)
+        let offset = id.checked_sub(1)?;
+        let index = usize::try_from(offset).ok()?;
+        self.reverse.get(index).map(std::convert::AsRef::as_ref)
     }
 
     fn ensure_invariants(&self) -> Result<(), String> {
         let next = usize::try_from(self.next.0)
             .map_err(|_| "label identifier exceeds usize range".to_owned())?;
+        if next == 0 {
+            return Err("next identifier must remain non-zero".into());
+        }
         if next.saturating_sub(1) != self.reverse.len() {
             return Err("reverse table length does not match next id".into());
         }
@@ -186,14 +201,23 @@ impl LabelInterner {
             if *id == 0 {
                 return Err("identifier zero is reserved".into());
             }
-            let index = usize::try_from(id.saturating_sub(1))
+            let offset = id
+                .checked_sub(1)
+                .ok_or_else(|| "label identifier underflow".to_owned())?;
+            let index = usize::try_from(offset)
                 .map_err(|_| "label identifier exceeds usize range".to_owned())?;
-            let Some(entry) = self.reverse.get(index) else {
-                return Err("identifier does not have reverse entry".into());
-            };
-            let expected = key.as_ref().canonical_string();
+            let entry = self
+                .reverse
+                .get(index)
+                .ok_or_else(|| "identifier does not have reverse entry".to_owned())?;
+            let expected = key
+                .canonical_str()
+                .map_err(|_| "label key is not valid UTF-8".to_owned())?;
             if entry.as_ref() != expected {
                 return Err("forward and reverse entries mismatch".into());
+            }
+            if seen[index] {
+                return Err("duplicate identifier present".into());
             }
             seen[index] = true;
         }
@@ -327,10 +351,10 @@ pub struct LabelKey {
 }
 
 impl LabelKey {
-    fn from_label(label: &Label) -> Self {
+    fn from_label(label: &Label) -> Result<Self, LabelInternerError> {
         match label {
-            Label::Greek(symbol) => Self::from_char(*symbol),
-            Label::Alpha(index) => Self::from_alpha(*index),
+            Label::Greek(symbol) => Ok(Self::from_char(*symbol)),
+            Label::Alpha(index) => Ok(Self::from_alpha(*index)),
             Label::Str(chars) => Self::from_char_slice(chars),
         }
     }
@@ -348,16 +372,18 @@ impl LabelKey {
         Self { bytes }
     }
 
-    fn from_char_slice(chars: &[char; 8]) -> Self {
+    fn from_char_slice(chars: &[char; 8]) -> Result<Self, LabelInternerError> {
         let mut bytes = SmallVec::<[u8; INLINE_LABEL_KEY_CAPACITY]>::new();
-
-        for symbol in chars {
-            if *symbol == ' ' {
+        for &symbol in chars {
+            if symbol == ' ' {
                 continue;
             }
-            Self::push_char(&mut bytes, *symbol);
+            if !symbol.is_ascii() {
+                return Err(LabelInternerError::InvalidLabelCharacter(symbol));
+            }
+            bytes.push(symbol as u8);
         }
-        Self { bytes }
+        Ok(Self { bytes })
     }
 
     fn push_char(buffer: &mut SmallVec<[u8; INLINE_LABEL_KEY_CAPACITY]>, symbol: char) {
@@ -374,37 +400,33 @@ impl LabelKey {
         let mut digits = [0_u8; MAX_USIZE_DECIMAL_DIGITS];
         let mut length = 0;
         while value > 0 {
-            let remainder = value % 10;
-            let digit = u8::try_from(remainder).unwrap_or_else(|_| {
-                debug_assert!(false, "label digits must fit into a single byte");
-                0
-            });
-            digits[length] = digit;
+            digits[length] = u8::try_from(value % 10).unwrap_or(0);
             length += 1;
             value /= 10;
         }
         for digit in digits[..length].iter().rev() {
             buffer.push(b'0' + *digit);
         }
-        self.data[index] = symbol as u8;
-        self.len += 1;
-        Ok(())
     }
 
-    fn clone_into_string(&self) -> String {
+    fn canonical_str(&self) -> Result<&str, Utf8Error> {
+        std::str::from_utf8(&self.bytes)
+    }
+
+    fn clone_into_boxed_str(&self) -> Box<str> {
         #[cfg(test)]
         {
             LABEL_KEY_CLONE_CALLS.with(|counter| counter.set(counter.get() + 1));
         }
         match String::from_utf8(self.bytes.clone().into_vec()) {
-            Ok(text) => text,
+            Ok(text) => text.into_boxed_str(),
             Err(error) => {
                 debug_assert!(false, "label keys must remain valid UTF-8");
-                let bytes = error.into_bytes();
-                String::from_utf8_lossy(&bytes).into_owned()
+                String::from_utf8_lossy(&error.into_bytes())
+                    .into_owned()
+                    .into_boxed_str()
             }
         }
-        text
     }
 
     #[cfg(test)]
@@ -439,23 +461,32 @@ mod tests {
     #[test]
     fn builds_greek_label_key() {
         let label = Label::Greek('λ');
-        let key = LabelKey::from_label(&label);
+        let key = LabelKey::from_label(&label).unwrap();
         assert_eq!("λ", key.as_str());
     }
 
     #[test]
     fn builds_alpha_label_key() {
         let label = Label::Alpha(42);
-        let key = LabelKey::from_label(&label);
+        let key = LabelKey::from_label(&label).unwrap();
         assert_eq!("α42", key.as_str());
     }
 
     #[test]
     fn trims_string_labels_in_key() {
         let label = Label::Str(['f', 'o', 'o', ' ', ' ', 'b', 'a', 'r']);
-        let key = LabelKey::from_label(&label);
+        let key = LabelKey::from_label(&label).unwrap();
         assert_eq!("foobar", key.as_str());
+    }
 
+    #[test]
+    fn rejects_non_ascii_string_label() {
+        let label = Label::Str(['α', ' ', ' ', ' ', ' ', ' ', ' ', ' ']);
+        let result = LabelKey::from_label(&label);
+        assert!(matches!(
+            result,
+            Err(LabelInternerError::InvalidLabelCharacter('α'))
+        ));
     }
 
     #[test]
