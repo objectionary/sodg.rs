@@ -15,6 +15,7 @@ use std::fmt::{Display, Formatter, Result as FmtResult};
 use std::hash::BuildHasherDefault;
 use std::str::Utf8Error;
 
+use itoa::Buffer as UsizeBuffer;
 use rustc_hash::FxHasher;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, ser::SerializeStruct};
 use smallvec::SmallVec;
@@ -23,6 +24,8 @@ use crate::Label;
 
 /// Identifier of an interned label.
 pub type LabelId = u32;
+
+const INLINE_LABEL_KEY_CAPACITY: usize = 32;
 
 /// Errors that may occur while working with a [`LabelInterner`].
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -274,80 +277,10 @@ impl<'de> Deserialize<'de> for LabelInterner {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-enum LabelKeyRepr {
-    Alpha(usize),
-    Greek(char),
-    Str(TrimmedStr),
-}
-
-/// Borrowed view of a canonical label key.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct LabelKeyRef<'a> {
-    repr: LabelKeyRepr,
-    _marker: PhantomData<&'a ()>,
-}
-
-impl LabelKeyRef<'_> {
-    const fn from_repr(repr: LabelKeyRepr) -> Self {
-        Self {
-            repr,
-            _marker: PhantomData,
-        }
-    }
-
-    const fn into_owned(self) -> LabelKey {
-        LabelKey::new(self.repr)
-    }
-
-    fn into_boxed_str(self) -> Box<str> {
-        #[cfg(test)]
-        boxed_string_allocations::increment();
-        match self.repr {
-            LabelKeyRepr::Alpha(index) => alpha_label_text(index).into_boxed_str(),
-            LabelKeyRepr::Greek(symbol) => symbol.to_string().into_boxed_str(),
-            LabelKeyRepr::Str(trimmed) => trimmed.into_string().into_boxed_str(),
-        }
-    }
-
-    fn canonical_string(&self) -> String {
-        match self.repr {
-            LabelKeyRepr::Alpha(index) => alpha_label_text(index),
-            LabelKeyRepr::Greek(symbol) => symbol.to_string(),
-            LabelKeyRepr::Str(trimmed) => trimmed.into_string(),
-        }
-    }
-
-    #[cfg(test)]
-    const fn repr(&self) -> LabelKeyRepr {
-        self.repr
-    }
-}
-
-impl LabelKeyRef<'static> {
-    fn from_label(label: &Label) -> Result<Self, LabelInternerError> {
-        Ok(Self::from_repr(match label {
-            Label::Greek(symbol) => LabelKeyRepr::Greek(*symbol),
-            Label::Alpha(index) => LabelKeyRepr::Alpha(*index),
-            Label::Str(chars) => LabelKeyRepr::Str(TrimmedStr::from_chars(chars)?),
-        }))
-    }
-}
-
-fn alpha_label_text(index: usize) -> String {
-    let mut buffer = itoa::Buffer::new();
-    let digits = buffer.format(index);
-    let mut text = String::with_capacity(1 + digits.len());
-    text.push('α');
-    text.push_str(digits);
-    text
-}
-
 /// Owned canonical label key used as a hash-map entry.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct LabelKey {
-    repr: LabelKeyRepr,
-    borrowed: LabelKeyRef<'static>,
+    bytes: SmallVec<[u8; INLINE_LABEL_KEY_CAPACITY]>,
 }
 
 impl LabelKey {
@@ -392,21 +325,10 @@ impl LabelKey {
         buffer.extend_from_slice(encoded.as_bytes());
     }
 
-    fn push_usize(buffer: &mut SmallVec<[u8; INLINE_LABEL_KEY_CAPACITY]>, mut value: usize) {
-        if value == 0 {
-            buffer.push(b'0');
-            return;
-        }
-        let mut digits = [0_u8; MAX_USIZE_DECIMAL_DIGITS];
-        let mut length = 0;
-        while value > 0 {
-            digits[length] = u8::try_from(value % 10).unwrap_or(0);
-            length += 1;
-            value /= 10;
-        }
-        for digit in digits[..length].iter().rev() {
-            buffer.push(b'0' + *digit);
-        }
+    fn push_usize(buffer: &mut SmallVec<[u8; INLINE_LABEL_KEY_CAPACITY]>, value: usize) {
+        let mut formatter = UsizeBuffer::new();
+        let digits = formatter.format(value);
+        buffer.extend_from_slice(digits.as_bytes());
     }
 
     fn canonical_str(&self) -> Result<&str, Utf8Error> {
