@@ -191,6 +191,31 @@ impl LabelInterner {
         self.get(label)
     }
 
+    /// Derive the canonical UTF-8 representation of the provided [`Label`].
+    ///
+    /// The returned value matches the representation stored inside the
+    /// [`LabelInterner`] when the label is interned. Callers can use this helper
+    /// to sanitize labels obtained from external sources before comparing them
+    /// against interned identifiers.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LabelInternerError::InvalidLabelCharacter`] when the label
+    /// contains a non-ASCII character that cannot participate in the canonical
+    /// UTF-8 representation.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,ignore
+    /// # use std::str::FromStr as _;
+    /// # use sodg::{Label, LabelInterner};
+    /// let canonical = LabelInterner::canonicalize(&Label::from_str("foo bar").unwrap()).unwrap();
+    /// assert_eq!(Label::from_str("foobar").unwrap(), canonical);
+    /// ```
+    pub(crate) fn canonicalize(label: &Label) -> Result<Label, LabelInternerError> {
+        Self::canonicalize_label(label)
+    }
+
     /// Resolve an identifier into its canonical UTF-8 label.
     ///
     /// # Examples
