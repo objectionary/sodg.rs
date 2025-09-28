@@ -7,7 +7,7 @@
 
 use std::fmt::Write as _;
 
-use sodg::{EdgeIndex, Label, LabelId, Sodg};
+use sodg::{EdgeIndex, EdgeIndexEntry, Label, LabelId, Sodg};
 
 /// Benchmark degrees that exercise both variants of [`EdgeIndex`].
 pub(crate) const BENCHMARK_DEGREES: [usize; 5] = [1, 31, 32, 33, 64];
@@ -22,7 +22,13 @@ pub(crate) fn label_ids_for_degree(degree: usize) -> Vec<LabelId> {
 pub(crate) fn populate_edge_index(index: &mut EdgeIndex, labels: &[LabelId]) {
     for (offset, label) in labels.iter().enumerate() {
         let destination = (offset + 1) as u32;
-        index.insert(*label, destination);
+        index.insert(
+            *label,
+            EdgeIndexEntry {
+                destination,
+                slot: offset,
+            },
+        );
     }
 }
 
@@ -89,7 +95,9 @@ pub(crate) fn dense_graph_with_locator<const N: usize>(
         let _ = write!(locator, "{}", main_label);
         for filler in 1..degree {
             let filler_label = Label::Alpha(segment + filler * depth);
-            graph.bind(current, next_vertex + filler, filler_label).unwrap();
+            graph
+                .bind(current, next_vertex + filler, filler_label)
+                .unwrap();
         }
         current = next_vertex;
         next_vertex += degree.max(1);

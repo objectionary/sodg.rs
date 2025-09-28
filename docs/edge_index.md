@@ -28,8 +28,10 @@ adaptive mapping from interned label identifiers to destination vertex ids.
   smoothen allocations across the 30–40 degree window. Callers should expect the
   amortized cost of inserts to stay nearly flat after the first promotion.
 * **Two sources of truth:** The vertex keeps the `Vec<Edge>` as the canonical
-  record while the index mirrors it. Tests assert that rebuilds and removals keep
-  the two data structures synchronized.
+  record while the index mirrors it. Each index entry stores the encoded
+  destination together with the slot of the corresponding `Edge`, allowing
+  updates to mutate edges directly without scanning the adjacency list. Tests
+  assert that rebuilds and removals keep the two data structures synchronized.
 * **Identifier limits:** `LabelId` and encoded vertex identifiers are `u32` to
   keep the index compact. Consumers must ensure the graph size stays within the
   representable range.

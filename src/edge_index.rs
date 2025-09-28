@@ -17,7 +17,20 @@ use rustc_hash::FxHasher;
 
 use crate::{Label, LabelId};
 
-type LargeIndexMap = HashMap<LabelId, u32, BuildHasherDefault<FxHasher>>;
+type LargeIndexMap = HashMap<LabelId, EdgeIndexEntry, BuildHasherDefault<FxHasher>>;
+
+/// Compact entry stored by [`EdgeIndex`].
+///
+/// The `destination` field keeps the encoded vertex identifier while `slot`
+/// points at the corresponding [`Edge`](crate::Edge) stored inside the owning
+/// vertex adjacency list.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub struct EdgeIndexEntry {
+    /// Encoded identifier of the destination vertex.
+    pub destination: u32,
+    /// Slot of the matching [`Edge`](crate::Edge) within `Vertex::edges`.
+    pub slot: usize,
+}
 
 /// Edge metadata stored on every vertex.
 ///
@@ -75,14 +88,21 @@ pub const SMALL_THRESHOLD: usize = 32;
 /// # Examples
 ///
 /// ```
-/// use sodg::{EdgeIndex, SMALL_THRESHOLD};
+/// use sodg::{EdgeIndex, EdgeIndexEntry, SMALL_THRESHOLD};
 ///
 /// let mut index = EdgeIndex::new();
 /// assert!(index.is_empty());
-/// index.insert(1, 42);
-/// assert_eq!(Some(42), index.get(1));
-/// for label in 2..=u32::try_from(SMALL_THRESHOLD).unwrap() {
-///     index.insert(label, label.saturating_mul(2));
+/// let entry = EdgeIndexEntry { destination: 42, slot: 0 };
+/// index.insert(1, entry);
+/// assert_eq!(Some(entry), index.get(1));
+/// for (slot_offset, label) in (2..=u32::try_from(SMALL_THRESHOLD).unwrap()).enumerate() {
+///     index.insert(
+///         label,
+///         EdgeIndexEntry {
+///             destination: label.saturating_mul(2),
+///             slot: slot_offset + 1,
+///         },
+///     );
 /// }
 /// assert!(index.len() >= SMALL_THRESHOLD);
 /// ```
@@ -90,7 +110,7 @@ pub const SMALL_THRESHOLD: usize = 32;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum EdgeIndex {
     /// Compact representation backed by [`micromap::Map`].
-    Small(micromap::Map<LabelId, u32, SMALL_THRESHOLD>),
+    Small(micromap::Map<LabelId, EdgeIndexEntry, SMALL_THRESHOLD>),
     /// Hash-based representation that handles arbitrarily many labels using [`FxHasher`].
     Large(LargeIndexMap),
 }
@@ -125,15 +145,23 @@ impl EdgeIndex {
 
     /// Retrieve the stored vertex identifier associated with `label`.
     #[must_use]
-    pub fn get(&self, label: LabelId) -> Option<u32> {
+    pub fn get(&self, label: LabelId) -> Option<EdgeIndexEntry> {
         match self {
             Self::Small(map) => map.get(&label).copied(),
             Self::Large(map) => map.get(&label).copied(),
         }
     }
 
+    /// Retrieve a mutable view of the entry associated with `label`.
+    pub fn get_mut(&mut self, label: LabelId) -> Option<&mut EdgeIndexEntry> {
+        match self {
+            Self::Small(map) => map.get_mut(&label),
+            Self::Large(map) => map.get_mut(&label),
+        }
+    }
+
     /// Insert a new mapping, returning the previous value if it existed.
-    pub fn insert(&mut self, label: LabelId, vertex: u32) -> Option<u32> {
+    pub fn insert(&mut self, label: LabelId, entry: EdgeIndexEntry) -> Option<EdgeIndexEntry> {
         match self {
             Self::Small(map) => {
                 if map.len() == SMALL_THRESHOLD && map.get(&label).is_none() {
@@ -145,10 +173,10 @@ impl EdgeIndex {
                         expected_capacity,
                         BuildHasherDefault::<FxHasher>::default(),
                     );
-                    for (stored_label, stored_vertex) in map.iter() {
-                        promoted.insert(*stored_label, *stored_vertex);
+                    for (stored_label, stored_entry) in map.iter() {
+                        promoted.insert(*stored_label, *stored_entry);
                     }
-                    promoted.insert(label, vertex);
+                    promoted.insert(label, entry);
                     let remaining_capacity = expected_capacity.saturating_sub(promoted.len());
                     if remaining_capacity > 0 {
                         let _ = promoted.try_reserve(remaining_capacity);
@@ -156,15 +184,15 @@ impl EdgeIndex {
                     *self = Self::Large(promoted);
                     None
                 } else {
-                    map.insert(label, vertex)
+                    map.insert(label, entry)
                 }
             }
-            Self::Large(map) => map.insert(label, vertex),
+            Self::Large(map) => map.insert(label, entry),
         }
     }
 
     /// Remove the mapping associated with `label`.
-    pub fn remove(&mut self, label: LabelId) -> Option<u32> {
+    pub fn remove(&mut self, label: LabelId) -> Option<EdgeIndexEntry> {
         match self {
             Self::Small(map) => map.remove(&label),
             Self::Large(map) => map.remove(&label),
@@ -174,11 +202,11 @@ impl EdgeIndex {
     /// Populate the index using entries produced by `pairs`.
     pub fn rebuild<I>(&mut self, pairs: I)
     where
-        I: IntoIterator<Item = (LabelId, u32)>,
+        I: IntoIterator<Item = (LabelId, EdgeIndexEntry)>,
     {
         *self = Self::default();
-        for (label, vertex) in pairs {
-            self.insert(label, vertex);
+        for (label, entry) in pairs {
+            self.insert(label, entry);
         }
     }
 }
@@ -191,8 +219,12 @@ mod tests {
     fn inserts_and_retrieves_entries() {
         let mut index = EdgeIndex::new();
         assert_eq!(0, index.len());
-        assert_eq!(None, index.insert(1, 7));
-        assert_eq!(Some(7), index.get(1));
+        let entry = EdgeIndexEntry {
+            destination: 7,
+            slot: 0,
+        };
+        assert_eq!(None, index.insert(1, entry));
+        assert_eq!(Some(entry), index.get(1));
         assert_eq!(1, index.len());
     }
 
@@ -201,24 +233,60 @@ mod tests {
         let mut index = EdgeIndex::new();
         let threshold = u32::try_from(SMALL_THRESHOLD).expect("SMALL_THRESHOLD fits into u32");
         for label in 0..threshold {
-            index.insert(label, label + 1);
+            index.insert(
+                label,
+                EdgeIndexEntry {
+                    destination: label + 1,
+                    slot: usize::try_from(label).expect("label fits into usize"),
+                },
+            );
         }
         assert!(matches!(index, EdgeIndex::Small(_)));
-        index.insert(threshold, 99);
+        let promoted_entry = EdgeIndexEntry {
+            destination: 99,
+            slot: usize::try_from(threshold).expect("label fits into usize"),
+        };
+        index.insert(threshold, promoted_entry);
         assert!(matches!(index, EdgeIndex::Large(_)));
-        assert_eq!(Some(99), index.get(threshold));
+        assert_eq!(Some(promoted_entry), index.get(threshold));
     }
 
     #[test]
     fn removes_entries_in_both_variants() {
         let mut index = EdgeIndex::new();
-        index.insert(1, 2);
-        assert_eq!(Some(2), index.remove(1));
+        index.insert(
+            1,
+            EdgeIndexEntry {
+                destination: 2,
+                slot: 0,
+            },
+        );
+        assert_eq!(
+            Some(EdgeIndexEntry {
+                destination: 2,
+                slot: 0,
+            }),
+            index.remove(1)
+        );
         assert_eq!(None, index.remove(1));
         let threshold = u32::try_from(SMALL_THRESHOLD).expect("SMALL_THRESHOLD fits into u32");
-        index.rebuild((0..=threshold).map(|label| (label, label + 1)));
+        index.rebuild((0..=threshold).map(|label| {
+            (
+                label,
+                EdgeIndexEntry {
+                    destination: label + 1,
+                    slot: usize::try_from(label).expect("label fits into usize"),
+                },
+            )
+        }));
         assert!(matches!(index, EdgeIndex::Large(_)));
-        assert_eq!(Some(2), index.remove(1));
+        assert_eq!(
+            Some(EdgeIndexEntry {
+                destination: 2,
+                slot: 1,
+            }),
+            index.remove(1)
+        );
         assert_eq!(None, index.get(1));
     }
 
@@ -228,7 +296,13 @@ mod tests {
             let mut index = EdgeIndex::new();
             let degree_u32 = u32::try_from(degree).expect("degree fits into u32");
             for label in 0..degree_u32 {
-                index.insert(label, label + 1);
+                index.insert(
+                    label,
+                    EdgeIndexEntry {
+                        destination: label + 1,
+                        slot: usize::try_from(label).expect("label fits into usize"),
+                    },
+                );
             }
             if degree <= SMALL_THRESHOLD {
                 assert!(
@@ -242,7 +316,13 @@ mod tests {
                 );
             }
             for label in 0..degree_u32 {
-                assert_eq!(Some(label + 1), index.get(label));
+                assert_eq!(
+                    Some(EdgeIndexEntry {
+                        destination: label + 1,
+                        slot: usize::try_from(label).expect("label fits into usize"),
+                    }),
+                    index.get(label)
+                );
             }
         }
     }
@@ -252,14 +332,32 @@ mod tests {
         let mut index = EdgeIndex::new();
         let threshold = u32::try_from(SMALL_THRESHOLD).expect("SMALL_THRESHOLD fits into u32");
         for label in 0..=threshold {
-            index.insert(label, label + 1);
+            index.insert(
+                label,
+                EdgeIndexEntry {
+                    destination: label + 1,
+                    slot: usize::try_from(label).expect("label fits into usize"),
+                },
+            );
         }
         assert!(matches!(index, EdgeIndex::Large(_)));
         for label in (threshold + 1)..(threshold + 40) {
-            index.insert(label, label + 1);
+            index.insert(
+                label,
+                EdgeIndexEntry {
+                    destination: label + 1,
+                    slot: usize::try_from(label).expect("label fits into usize"),
+                },
+            );
         }
         for label in 0..(threshold + 40) {
-            assert_eq!(Some(label + 1), index.get(label));
+            assert_eq!(
+                Some(EdgeIndexEntry {
+                    destination: label + 1,
+                    slot: usize::try_from(label).expect("label fits into usize"),
+                }),
+                index.get(label)
+            );
         }
     }
 }

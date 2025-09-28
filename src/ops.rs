@@ -10,7 +10,9 @@ use std::convert::TryFrom as _;
 use std::fmt::{Display, Formatter, Result as FmtResult};
 use std::str::FromStr as _;
 
-use crate::{BRANCH_NONE, BRANCH_STATIC, Edge, EdgeIndex, LabelId, Persistence, Sodg, Vertex};
+use crate::{
+    BRANCH_NONE, BRANCH_STATIC, Edge, EdgeIndex, EdgeIndexEntry, LabelId, Persistence, Sodg, Vertex,
+};
 use crate::{Hex, Label, LabelInterner, LabelInternerError};
 
 #[cfg(test)]
@@ -85,12 +87,12 @@ impl<const N: usize> Vertex<N> {
         label_id: LabelId,
         label: Label,
         destination: usize,
+        slot: usize,
     ) -> bool {
-        if let Some(edge) = self.edges.iter_mut().find(|edge| {
+        if let Some(edge) = self.edges.get_mut(slot) {
             #[cfg(test)]
             EDGE_COMPARISON_COUNTER.with(|counter| counter.set(counter.get() + 1));
-            edge.label_id == label_id
-        }) {
+            debug_assert_eq!(edge.label_id, label_id);
             edge.to = destination;
             edge.label = label;
             true
@@ -99,38 +101,49 @@ impl<const N: usize> Vertex<N> {
         }
     }
 
-    fn push_edge(&mut self, label_id: LabelId, label: Label, destination: usize) {
+    fn push_edge(&mut self, label_id: LabelId, label: Label, destination: usize) -> usize {
+        let slot = self.edges.len();
         self.edges.push(Edge {
             label_id,
             label,
             to: destination,
         });
-    }
-
-    fn update_index(&mut self, label_id: LabelId, destination: u32) -> Option<u32> {
-        self.index.insert(label_id, destination)
+        slot
     }
 
     pub(crate) fn rebuild_index(&mut self) {
-        let pairs = self
-            .edges
-            .iter()
-            .map(|edge| (edge.label_id, Sodg::<N>::encode_vertex_id(edge.to)));
+        let pairs = self.edges.iter().enumerate().map(|(slot, edge)| {
+            (
+                edge.label_id,
+                crate::EdgeIndexEntry {
+                    destination: Sodg::<N>::encode_vertex_id(edge.to),
+                    slot,
+                },
+            )
+        });
         self.index.rebuild(pairs);
     }
 
     #[allow(dead_code)]
     fn remove_edge(&mut self, label_id: LabelId) -> Option<Edge> {
-        let position = self
-            .edges
-            .iter()
-            .position(|edge| edge.label_id == label_id)?;
-        self.index.remove(label_id);
-        Some(self.edges.remove(position))
+        let entry = self.index.remove(label_id)?;
+        let removed = self.edges.swap_remove(entry.slot);
+        if entry.slot < self.edges.len() {
+            let moved_label_id = self.edges[entry.slot].label_id;
+            if let Some(moved_entry) = self.index.get_mut(moved_label_id) {
+                moved_entry.slot = entry.slot;
+            } else {
+                debug_assert!(
+                    false,
+                    "edge index lost track of label {moved_label_id} after swap-remove"
+                );
+            }
+        }
+        Some(removed)
     }
 
     fn get_destination(&self, label_id: LabelId) -> Option<u32> {
-        self.index.get(label_id)
+        self.index.get(label_id).map(|entry| entry.destination)
     }
 }
 
@@ -205,16 +218,18 @@ impl<const N: usize> Sodg<N> {
         label_id: LabelId,
         destination: usize,
     ) {
-        if let Some(vertex) = self.vertices.get_mut(source)
-            && let Some(edge) = vertex
-                .edges
-                .iter_mut()
-                .find(|edge| edge.label_id == label_id)
-        {
-            edge.to = destination;
-            vertex
-                .index
-                .insert(label_id, Self::encode_vertex_id(destination));
+        let Some(vertex) = self.vertices.get_mut(source) else {
+            return;
+        };
+        if let Some(entry) = vertex.index.get_mut(label_id) {
+            entry.destination = Self::encode_vertex_id(destination);
+            let slot = entry.slot;
+            if let Some(edge) = vertex.edges.get_mut(slot) {
+                edge.to = destination;
+            } else {
+                debug_assert!(false, "edge index slot {slot} is out of bounds");
+                vertex.rebuild_index();
+            }
         }
     }
 
@@ -426,15 +441,28 @@ impl<const N: usize> Sodg<N> {
         let destination = Self::encode_vertex_id(v2);
         {
             let vertex = self.vertices.get_mut(v1).unwrap();
-            let previous = vertex.update_index(label_id, destination);
-            if previous.is_some() {
-                let updated = vertex.update_existing_edge(label_id, label, v2);
+            if let Some(slot) = vertex.index.get_mut(label_id).map(|entry| {
+                entry.destination = destination;
+                entry.slot
+            }) {
+                let updated = vertex.update_existing_edge(label_id, label, v2, slot);
                 if !updated {
                     debug_assert!(false, "edge index and adjacency list diverged");
-                    vertex.push_edge(label_id, label, v2);
+                    let slot = vertex.push_edge(label_id, label, v2);
+                    if let Some(entry) = vertex.index.get_mut(label_id) {
+                        entry.destination = destination;
+                        entry.slot = slot;
+                    } else {
+                        vertex
+                            .index
+                            .insert(label_id, EdgeIndexEntry { destination, slot });
+                    }
                 }
             } else {
-                vertex.push_edge(label_id, label, v2);
+                let slot = vertex.push_edge(label_id, label, v2);
+                vertex
+                    .index
+                    .insert(label_id, EdgeIndexEntry { destination, slot });
             }
         }
         let vtx1 = self.vertices.get_mut(v1).unwrap();
@@ -1159,7 +1187,7 @@ mod tests {
     }
 
     #[test]
-    fn rebinding_small_index_edges_is_linear() {
+    fn rebinding_small_index_edges_updates_single_entry() {
         let mut g: Sodg<64> = Sodg::empty(SMALL_THRESHOLD * 2 + 4);
         g.add(0);
         for label_idx in 0..SMALL_THRESHOLD {
@@ -1179,12 +1207,42 @@ mod tests {
             g.add(new_destination);
             g.bind(0, new_destination, Label::Alpha(label_idx)).unwrap();
             let after = super::edge_comparison_count();
-            assert_eq!(label_idx + 1, after - before);
+            assert_eq!(1, after - before);
             assert_eq!(Some(new_destination), g.kid(0, Label::Alpha(label_idx)));
         }
         assert!(matches!(
             g.vertices.get(0).unwrap().index,
             EdgeIndex::Small(_)
+        ));
+    }
+
+    #[test]
+    fn rebinding_large_index_edges_updates_single_entry() {
+        let degree = SMALL_THRESHOLD + 8;
+        let mut g: Sodg<128> = Sodg::empty(degree * 3);
+        g.add(0);
+        for label_idx in 0..degree {
+            let destination = label_idx + 1;
+            g.add(destination);
+            g.bind(0, destination, Label::Alpha(label_idx)).unwrap();
+        }
+        assert!(matches!(
+            g.vertices.get(0).unwrap().index,
+            EdgeIndex::Large(_)
+        ));
+        super::reset_edge_comparison_counter();
+        for label_idx in 0..degree {
+            let before = super::edge_comparison_count();
+            let new_destination = degree + 1 + label_idx;
+            g.add(new_destination);
+            g.bind(0, new_destination, Label::Alpha(label_idx)).unwrap();
+            let after = super::edge_comparison_count();
+            assert_eq!(1, after - before);
+            assert_eq!(Some(new_destination), g.kid(0, Label::Alpha(label_idx)));
+        }
+        assert!(matches!(
+            g.vertices.get(0).unwrap().index,
+            EdgeIndex::Large(_)
         ));
     }
 
@@ -1202,6 +1260,18 @@ mod tests {
             assert_eq!(previous - 1, vertex.edges.len());
             assert_eq!(vertex.edges.len(), vertex.index.len());
             assert!(matches!(vertex.index, EdgeIndex::Small(_)));
+            for (slot, edge) in vertex.edges.iter().enumerate() {
+                let entry = vertex
+                    .index
+                    .get(edge.label_id)
+                    .expect("index entry must exist after removal");
+                assert_eq!(slot, entry.slot);
+                assert_eq!(
+                    Sodg::<64>::encode_vertex_id(edge.to),
+                    entry.destination,
+                    "destination must match encoded value",
+                );
+            }
         }
         assert!(g.kid(0, label).is_none());
     }
@@ -1220,6 +1290,18 @@ mod tests {
             assert_eq!(2, removed.to);
             assert_eq!(previous - 1, vertex.edges.len());
             assert_eq!(vertex.edges.len(), vertex.index.len());
+            for (slot, edge) in vertex.edges.iter().enumerate() {
+                let entry = vertex
+                    .index
+                    .get(edge.label_id)
+                    .expect("index entry must exist after removal");
+                assert_eq!(slot, entry.slot);
+                assert_eq!(
+                    Sodg::<64>::encode_vertex_id(edge.to),
+                    entry.destination,
+                    "destination must match encoded value",
+                );
+            }
         }
         assert!(matches!(
             g.vertices.get(0).unwrap().index,
