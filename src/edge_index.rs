@@ -9,11 +9,15 @@
 //! predefined [`SMALL_THRESHOLD`]. This keeps lookups efficient without paying
 //! the hash-map overhead for the common, tiny vertex case.
 
-use std::collections::HashMap;
+use std::{collections::HashMap, hash::BuildHasherDefault};
 
 use serde::{Deserialize, Serialize};
 
+use rustc_hash::FxHasher;
+
 use crate::{Label, LabelId};
+
+type LargeIndexMap = HashMap<LabelId, u32, BuildHasherDefault<FxHasher>>;
 
 /// Edge metadata stored on every vertex.
 ///
@@ -87,8 +91,8 @@ pub const SMALL_THRESHOLD: usize = 32;
 pub enum EdgeIndex {
     /// Compact representation backed by [`micromap::Map`].
     Small(micromap::Map<LabelId, u32, SMALL_THRESHOLD>),
-    /// Hash-based representation that handles arbitrarily many labels.
-    Large(HashMap<LabelId, u32>),
+    /// Hash-based representation that handles arbitrarily many labels using [`FxHasher`].
+    Large(LargeIndexMap),
 }
 
 impl Default for EdgeIndex {
@@ -137,7 +141,10 @@ impl EdgeIndex {
                     let expected_capacity = current_len
                         .saturating_mul(2)
                         .max(current_len.saturating_add(1));
-                    let mut promoted = HashMap::with_capacity(expected_capacity);
+                    let mut promoted = LargeIndexMap::with_capacity_and_hasher(
+                        expected_capacity,
+                        BuildHasherDefault::<FxHasher>::default(),
+                    );
                     for (stored_label, stored_vertex) in map.iter() {
                         promoted.insert(*stored_label, *stored_vertex);
                     }
