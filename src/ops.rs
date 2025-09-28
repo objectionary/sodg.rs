@@ -13,6 +13,24 @@ use std::str::FromStr as _;
 use crate::{BRANCH_NONE, BRANCH_STATIC, Edge, EdgeIndex, LabelId, Persistence, Sodg, Vertex};
 use crate::{Hex, Label, LabelInterner, LabelInternerError};
 
+#[cfg(test)]
+use std::cell::Cell;
+
+#[cfg(test)]
+thread_local! {
+    static EDGE_COMPARISON_COUNTER: Cell<usize> = Cell::new(0);
+}
+
+#[cfg(test)]
+fn reset_edge_comparison_counter() {
+    EDGE_COMPARISON_COUNTER.with(|counter| counter.set(0));
+}
+
+#[cfg(test)]
+fn edge_comparison_count() -> usize {
+    EDGE_COMPARISON_COUNTER.with(|counter| counter.get())
+}
+
 /// Errors that may occur when binding vertices with pre-interned labels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BindError {
@@ -42,21 +60,35 @@ impl Display for BindError {
 impl std::error::Error for BindError {}
 
 impl<const N: usize> Vertex<N> {
-    fn upsert_edge(&mut self, label_id: LabelId, label: Label, destination: usize) {
-        if let Some(edge) = self.edges.iter_mut().find(|edge| edge.label_id == label_id) {
+    fn update_existing_edge(
+        &mut self,
+        label_id: LabelId,
+        label: Label,
+        destination: usize,
+    ) -> bool {
+        if let Some(edge) = self.edges.iter_mut().find(|edge| {
+            #[cfg(test)]
+            EDGE_COMPARISON_COUNTER.with(|counter| counter.set(counter.get() + 1));
+            edge.label_id == label_id
+        }) {
             edge.to = destination;
             edge.label = label;
+            true
         } else {
-            self.edges.push(Edge {
-                label_id,
-                label,
-                to: destination,
-            });
+            false
         }
     }
 
-    fn update_index(&mut self, label_id: LabelId, destination: u32) {
-        self.index.insert(label_id, destination);
+    fn push_edge(&mut self, label_id: LabelId, label: Label, destination: usize) {
+        self.edges.push(Edge {
+            label_id,
+            label,
+            to: destination,
+        });
+    }
+
+    fn update_index(&mut self, label_id: LabelId, destination: u32) -> Option<u32> {
+        self.index.insert(label_id, destination)
     }
 
     pub(crate) fn rebuild_index(&mut self) {
@@ -363,9 +395,20 @@ impl<const N: usize> Sodg<N> {
         let mut ours = self.vertices.get(v1).unwrap().branch;
         let theirs = self.vertices.get(v2).unwrap().branch;
         let destination = Self::encode_vertex_id(v2);
+        {
+            let vertex = self.vertices.get_mut(v1).unwrap();
+            let previous = vertex.update_index(label_id, destination);
+            if previous.is_some() {
+                let updated = vertex.update_existing_edge(label_id, label, v2);
+                if !updated {
+                    debug_assert!(false, "edge index and adjacency list diverged");
+                    vertex.push_edge(label_id, label, v2);
+                }
+            } else {
+                vertex.push_edge(label_id, label, v2);
+            }
+        }
         let vtx1 = self.vertices.get_mut(v1).unwrap();
-        vtx1.upsert_edge(label_id, label, v2);
-        vtx1.update_index(label_id, destination);
         if ours == BRANCH_STATIC {
             if theirs == BRANCH_STATIC {
                 for b in self.branches.iter_mut() {
@@ -1043,6 +1086,51 @@ mod tests {
             .expect("edge must exist");
         assert_eq!(canonical, edge.label);
         assert_eq!(2, edge.to);
+    }
+
+    #[test]
+    fn binds_many_unique_labels_preserves_destinations() {
+        const EDGE_COUNT: usize = 256;
+        let mut g: Sodg<16> = Sodg::empty(EDGE_COUNT * 2 + 4);
+        g.add(0);
+        for label_idx in 0..EDGE_COUNT {
+            let destination = label_idx + 1;
+            g.add(destination);
+            g.bind(0, destination, Label::Alpha(label_idx));
+        }
+        for label_idx in 0..EDGE_COUNT {
+            assert_eq!(Some(label_idx + 1), g.kid(0, Label::Alpha(label_idx)));
+        }
+    }
+
+    #[test]
+    fn rebinding_small_index_edges_is_linear() {
+        let mut g: Sodg<64> = Sodg::empty(SMALL_THRESHOLD * 2 + 4);
+        g.add(0);
+        for label_idx in 0..SMALL_THRESHOLD {
+            let destination = label_idx + 1;
+            g.add(destination);
+            g.bind(0, destination, Label::Alpha(label_idx));
+        }
+        assert!(matches!(
+            g.vertices.get(0).unwrap().index,
+            EdgeIndex::Small(_)
+        ));
+        super::reset_edge_comparison_counter();
+        assert_eq!(0, super::edge_comparison_count());
+        for label_idx in 0..SMALL_THRESHOLD {
+            let before = super::edge_comparison_count();
+            let new_destination = SMALL_THRESHOLD + 1 + label_idx;
+            g.add(new_destination);
+            g.bind(0, new_destination, Label::Alpha(label_idx));
+            let after = super::edge_comparison_count();
+            assert_eq!(label_idx + 1, after - before);
+            assert_eq!(Some(new_destination), g.kid(0, Label::Alpha(label_idx)));
+        }
+        assert!(matches!(
+            g.vertices.get(0).unwrap().index,
+            EdgeIndex::Small(_)
+        ));
     }
 
     #[test]
