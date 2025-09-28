@@ -16,6 +16,7 @@
 #![allow(clippy::unit_arg)]
 
 use std::hint::black_box;
+use std::str::FromStr as _;
 use std::time::Duration;
 
 use criterion::{BatchSize, BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
@@ -69,39 +70,47 @@ fn bench_add_vertices(c: &mut Criterion) {
 /// Throughput is the number of successful `bind` calls per iteration.
 fn bench_bind_edges(c: &mut Criterion) {
     let sizes = [10, 100, 200];
+    let labels = [
+        ("alpha", Label::Alpha(0)),
+        (
+            "long_str",
+            Label::from_str("abcdefgh").expect("valid label"),
+        ),
+    ];
     let mut group = c.benchmark_group("bind_edges");
-    for &n in &sizes {
-        // Approximate number of binds, skipping every 16th edge.
-        let ops = if n > 1 { (n - 1) - (n - 1) / 16 } else { 0 };
-        group.throughput(Throughput::Elements(ops as u64));
-        group.bench_with_input(BenchmarkId::from_parameter(n), &n, |b, &n| {
-            b.iter_batched(
-                || {
-                    let mut g = setup_graph(n);
-                    let label = Label::Alpha(0);
-                    let label_id = g.intern_label(&label).expect("intern label");
-                    (g, label, label_id)
-                },
-                |(mut g, label, label_id)| {
-                    for i in 0..n.saturating_sub(1) {
-                        if i % 16 != 0 {
-                            // Keep the label interned across binds; erroring here would indicate a test bug.
-                            black_box(
-                                g.bind_with_label_id(
-                                    black_box(i),
-                                    black_box(i + 1),
-                                    label_id,
-                                    label,
-                                )
-                                .expect("label must remain interned"),
-                            );
+    for &(name, label) in &labels {
+        for &n in &sizes {
+            // Approximate number of binds, skipping every 16th edge.
+            let ops = if n > 1 { (n - 1) - (n - 1) / 16 } else { 0 };
+            group.throughput(Throughput::Elements(ops as u64));
+            group.bench_with_input(BenchmarkId::new(name, n), &n, |b, &n| {
+                b.iter_batched(
+                    || {
+                        let mut g = setup_graph(n);
+                        let label_id = g.intern_label(&label).expect("intern label");
+                        (g, label, label_id)
+                    },
+                    |(mut g, label, label_id)| {
+                        for i in 0..n.saturating_sub(1) {
+                            if i % 16 != 0 {
+                                // Keep the label interned across binds; erroring here would indicate a test bug.
+                                black_box(
+                                    g.bind_with_label_id(
+                                        black_box(i),
+                                        black_box(i + 1),
+                                        label_id,
+                                        label,
+                                    )
+                                    .expect("label must remain interned"),
+                                );
+                            }
                         }
-                    }
-                    black_box(g);
-                },
-                BatchSize::SmallInput,
-            );
-        });
+                        black_box(g);
+                    },
+                    BatchSize::SmallInput,
+                );
+            });
+        }
     }
     group.finish();
 }
@@ -110,26 +119,34 @@ fn bench_bind_edges(c: &mut Criterion) {
 /// One iteration does 128 `get` hits and 128 `get_or_intern` hits; we report 256 elements.
 fn bench_label_interner_reuse(c: &mut Criterion) {
     let mut group = c.benchmark_group("label_interner_reuse");
-    let label = Label::Alpha(7);
     group.throughput(Throughput::Elements(256));
-    group.bench_function("reuse_alpha", |b| {
-        b.iter_batched(
-            || {
-                let mut interner = LabelInterner::default();
-                interner.get_or_intern(&label).expect("seed intern");
-                interner
-            },
-            |mut interner| {
-                for _ in 0..128 {
-                    black_box(interner.get(&label));
-                }
-                for _ in 0..128 {
-                    black_box(interner.get_or_intern(&label).expect("hit intern"));
-                }
-            },
-            BatchSize::SmallInput,
-        );
-    });
+    let labels = [
+        ("alpha", Label::Alpha(7)),
+        (
+            "long_str",
+            Label::from_str("abcdefgh").expect("valid label"),
+        ),
+    ];
+    for (name, label) in labels {
+        group.bench_function(format!("reuse_{name}"), move |b| {
+            b.iter_batched(
+                || {
+                    let mut interner = LabelInterner::default();
+                    interner.get_or_intern(&label).expect("seed intern");
+                    interner
+                },
+                |mut interner| {
+                    for _ in 0..128 {
+                        black_box(interner.get(&label));
+                    }
+                    for _ in 0..128 {
+                        black_box(interner.get_or_intern(&label).expect("hit intern"));
+                    }
+                },
+                BatchSize::SmallInput,
+            );
+        });
+    }
     group.finish();
 }
 

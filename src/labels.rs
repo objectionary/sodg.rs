@@ -15,9 +15,14 @@ use std::fmt::{Display, Formatter, Result as FmtResult};
 use std::hash::BuildHasherDefault;
 use std::str::{FromStr as _, Utf8Error};
 
+use std::borrow::Cow;
+
 use itoa::Buffer as UsizeBuffer;
 use rustc_hash::FxHasher;
-use serde::{Deserialize, Deserializer, Serialize, Serializer, ser::SerializeStruct};
+use serde::de::value::SeqAccessDeserializer;
+use serde::{
+    Deserialize, Deserializer, Serialize, Serializer, de::SeqAccess, ser::SerializeStruct,
+};
 use smallvec::SmallVec;
 
 use crate::Label;
@@ -310,8 +315,9 @@ impl LabelInterner {
                 .get(index)
                 .ok_or_else(|| "identifier does not have reverse entry".to_owned())?;
             let expected = key
-                .canonical_str()
+                .canonical_text()
                 .map_err(|_| "label key is not valid UTF-8".to_owned())?;
+            let expected = expected.into_owned();
             if entry.as_ref() != expected {
                 return Err("forward and reverse entries mismatch".into());
             }
@@ -397,31 +403,20 @@ impl<'de> Deserialize<'de> for LabelInterner {
 }
 
 /// Owned canonical label key used as a hash-map entry.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct LabelKey {
-    bytes: SmallVec<[u8; INLINE_LABEL_KEY_CAPACITY]>,
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum LabelKey {
+    Alpha(usize),
+    Greek(char),
+    Str(SmallVec<[u8; INLINE_LABEL_KEY_CAPACITY]>),
 }
 
 impl LabelKey {
     fn from_label(label: &Label) -> Result<Self, LabelInternerError> {
         match label {
-            Label::Greek(symbol) => Ok(Self::from_char(*symbol)),
-            Label::Alpha(index) => Ok(Self::from_alpha(*index)),
+            Label::Greek(symbol) => Ok(Self::Greek(*symbol)),
+            Label::Alpha(index) => Ok(Self::Alpha(*index)),
             Label::Str(chars) => Self::from_char_slice(chars),
         }
-    }
-
-    fn from_char(symbol: char) -> Self {
-        let mut bytes = SmallVec::<[u8; INLINE_LABEL_KEY_CAPACITY]>::new();
-        Self::push_char(&mut bytes, symbol);
-        Self { bytes }
-    }
-
-    fn from_alpha(index: usize) -> Self {
-        let mut bytes = SmallVec::<[u8; INLINE_LABEL_KEY_CAPACITY]>::new();
-        Self::push_char(&mut bytes, 'α');
-        Self::push_usize(&mut bytes, index);
-        Self { bytes }
     }
 
     fn from_char_slice(chars: &[char; 8]) -> Result<Self, LabelInternerError> {
@@ -435,23 +430,26 @@ impl LabelKey {
             }
             bytes.push(symbol as u8);
         }
-        Ok(Self { bytes })
+        Ok(Self::Str(bytes))
     }
 
-    fn push_char(buffer: &mut SmallVec<[u8; INLINE_LABEL_KEY_CAPACITY]>, symbol: char) {
-        let mut encoded = [0_u8; 4];
-        let encoded = symbol.encode_utf8(&mut encoded);
-        buffer.extend_from_slice(encoded.as_bytes());
-    }
-
-    fn push_usize(buffer: &mut SmallVec<[u8; INLINE_LABEL_KEY_CAPACITY]>, value: usize) {
-        let mut formatter = UsizeBuffer::new();
-        let digits = formatter.format(value);
-        buffer.extend_from_slice(digits.as_bytes());
-    }
-
-    fn canonical_str(&self) -> Result<&str, Utf8Error> {
-        std::str::from_utf8(&self.bytes)
+    fn canonical_text(&self) -> Result<Cow<'_, str>, Utf8Error> {
+        match self {
+            Self::Greek(symbol) => {
+                let mut encoded = [0_u8; 4];
+                let text = symbol.encode_utf8(&mut encoded);
+                Ok(Cow::Owned(text.to_owned()))
+            }
+            Self::Alpha(index) => {
+                let mut formatter = UsizeBuffer::new();
+                let digits = formatter.format(*index);
+                let mut text = String::with_capacity(1 + digits.len());
+                text.push('α');
+                text.push_str(digits);
+                Ok(Cow::Owned(text))
+            }
+            Self::Str(bytes) => Ok(Cow::Borrowed(std::str::from_utf8(bytes)?)),
+        }
     }
 
     fn clone_into_boxed_str(&self) -> Box<str> {
@@ -459,20 +457,138 @@ impl LabelKey {
         {
             LABEL_KEY_CLONE_CALLS.with(|counter| counter.set(counter.get() + 1));
         }
-        match String::from_utf8(self.bytes.clone().into_vec()) {
-            Ok(text) => text.into_boxed_str(),
-            Err(error) => {
-                debug_assert!(false, "label keys must remain valid UTF-8");
-                String::from_utf8_lossy(&error.into_bytes())
-                    .into_owned()
-                    .into_boxed_str()
+        match self {
+            Self::Greek(symbol) => {
+                let mut encoded = [0_u8; 4];
+                symbol.encode_utf8(&mut encoded).to_owned().into_boxed_str()
             }
+            Self::Alpha(index) => {
+                let mut formatter = UsizeBuffer::new();
+                let digits = formatter.format(*index);
+                let mut text = String::with_capacity(1 + digits.len());
+                text.push('α');
+                text.push_str(digits);
+                text.into_boxed_str()
+            }
+            Self::Str(bytes) => match String::from_utf8(bytes.clone().into_vec()) {
+                Ok(text) => text.into_boxed_str(),
+                Err(error) => {
+                    debug_assert!(false, "label keys must remain valid UTF-8");
+                    String::from_utf8_lossy(&error.into_bytes())
+                        .into_owned()
+                        .into_boxed_str()
+                }
+            },
         }
     }
 
     #[cfg(test)]
-    fn as_str(&self) -> &str {
-        std::str::from_utf8(&self.bytes).expect("label keys must remain valid UTF-8")
+    fn as_string(&self) -> String {
+        match self.canonical_text() {
+            Ok(Cow::Borrowed(text)) => text.to_owned(),
+            Ok(Cow::Owned(text)) => text,
+            Err(_) => panic!("label keys must remain valid UTF-8"),
+        }
+    }
+}
+
+impl Serialize for LabelKey {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let text = self
+            .canonical_text()
+            .map_err(|error| <S::Error as serde::ser::Error>::custom(error.to_string()))?;
+        match text {
+            Cow::Borrowed(value) => serializer.serialize_str(value),
+            Cow::Owned(value) => serializer.serialize_str(value.as_str()),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for LabelKey {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        fn from_text<E>(text: &str) -> Result<LabelKey, E>
+        where
+            E: serde::de::Error,
+        {
+            let label = Label::from_str(text)
+                .map_err(|error| <E as serde::de::Error>::custom(error.to_string()))?;
+            LabelKey::from_label(&label)
+                .map_err(|error| <E as serde::de::Error>::custom(error.to_string()))
+        }
+
+        fn from_bytes<E>(bytes: &[u8]) -> Result<LabelKey, E>
+        where
+            E: serde::de::Error,
+        {
+            let text = std::str::from_utf8(bytes)
+                .map_err(|error| <E as serde::de::Error>::custom(error.to_string()))?;
+            from_text(text)
+        }
+
+        struct LabelKeyVisitor;
+
+        impl<'de> serde::de::Visitor<'de> for LabelKeyVisitor {
+            type Value = LabelKey;
+
+            fn expecting(&self, formatter: &mut Formatter<'_>) -> FmtResult {
+                formatter.write_str("canonical label bytes or string")
+            }
+
+            fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                from_text(value)
+            }
+
+            fn visit_string<E>(self, value: String) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                from_text(&value)
+            }
+
+            fn visit_bytes<E>(self, value: &[u8]) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                from_bytes(value)
+            }
+
+            fn visit_borrowed_bytes<E>(self, value: &'de [u8]) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                from_bytes(value)
+            }
+
+            fn visit_byte_buf<E>(self, value: Vec<u8>) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                from_bytes(&value)
+            }
+
+            fn visit_seq<A>(self, seq: A) -> Result<Self::Value, A::Error>
+            where
+                A: SeqAccess<'de>,
+            {
+                let bytes: Vec<u8> = Deserialize::deserialize(SeqAccessDeserializer::new(seq))?;
+                from_bytes(&bytes)
+            }
+        }
+
+        if deserializer.is_human_readable() {
+            deserializer.deserialize_str(LabelKeyVisitor)
+        } else {
+            deserializer.deserialize_bytes(LabelKeyVisitor)
+        }
     }
 }
 
@@ -503,21 +619,21 @@ mod tests {
     fn builds_greek_label_key() {
         let label = Label::Greek('λ');
         let key = LabelKey::from_label(&label).unwrap();
-        assert_eq!("λ", key.as_str());
+        assert_eq!("λ", key.as_string());
     }
 
     #[test]
     fn builds_alpha_label_key() {
         let label = Label::Alpha(42);
         let key = LabelKey::from_label(&label).unwrap();
-        assert_eq!("α42", key.as_str());
+        assert_eq!("α42", key.as_string());
     }
 
     #[test]
     fn trims_string_labels_in_key() {
         let label = Label::Str(['f', 'o', 'o', ' ', ' ', 'b', 'a', 'r']);
         let key = LabelKey::from_label(&label).unwrap();
-        assert_eq!("foobar", key.as_str());
+        assert_eq!("foobar", key.as_string());
     }
 
     #[test]
