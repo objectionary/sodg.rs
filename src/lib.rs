@@ -67,7 +67,7 @@ mod slice;
 mod xml;
 
 pub use crate::labels::{LabelId, LabelInterner, LabelInternerError};
-pub use crate::ops::KidRef;
+pub use crate::ops::{BindError, KidRef};
 pub use edge_index::{Edge, EdgeIndex, SMALL_THRESHOLD};
 
 const HEX_SIZE: usize = 8;

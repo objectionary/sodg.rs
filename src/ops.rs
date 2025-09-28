@@ -7,10 +7,39 @@ use log::trace;
 
 use std::borrow::Cow;
 use std::convert::TryFrom as _;
+use std::fmt::{Display, Formatter, Result as FmtResult};
 use std::str::FromStr as _;
 
 use crate::{BRANCH_NONE, BRANCH_STATIC, Edge, EdgeIndex, LabelId, Persistence, Sodg, Vertex};
 use crate::{Hex, Label, LabelInterner, LabelInternerError};
+
+/// Errors that may occur when binding vertices with pre-interned labels.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BindError {
+    /// The provided identifier does not exist in the [`LabelInterner`].
+    UnknownLabelId(LabelId),
+    /// The supplied [`Label`] does not match the canonical representation of the identifier.
+    LabelMismatch {
+        /// Canonical label stored in the interner.
+        expected: Label,
+        /// Caller-provided label value.
+        provided: Label,
+    },
+}
+
+impl Display for BindError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        match self {
+            Self::UnknownLabelId(id) => write!(f, "label identifier {id} is not interned"),
+            Self::LabelMismatch { expected, provided } => write!(
+                f,
+                "label {provided} does not match canonical representation {expected}"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for BindError {}
 
 impl<const N: usize> Vertex<N> {
     fn upsert_edge(&mut self, label_id: LabelId, label: Label, destination: usize) {
@@ -80,7 +109,7 @@ impl<const N: usize> Sodg<N> {
     /// graph.add(1);
     /// let label = Label::from_str("edge").unwrap();
     /// let id = graph.intern_label(&label).unwrap();
-    /// graph.bind_with_label_id(0, 1, id, label);
+    /// graph.bind_with_label_id(0, 1, id, label).unwrap();
     /// assert_eq!(Some(1), graph.kid(0, Label::from_str("edge").unwrap()));
     /// ```
     pub fn intern_label(&mut self, label: &Label) -> Result<LabelId, LabelInternerError> {
@@ -265,7 +294,8 @@ impl<const N: usize> Sodg<N> {
             .labels
             .get_or_intern(&a)
             .expect("label interner capacity exhausted");
-        self.bind_with_label_id(v1, v2, label_id, a);
+        self.bind_with_label_id(v1, v2, label_id, a)
+            .expect("interned label must remain canonical");
     }
 
     /// Bind two vertices using an already interned label identifier.
@@ -275,16 +305,51 @@ impl<const N: usize> Sodg<N> {
     /// [`Sodg::label_id`]. It behaves identically to [`bind`](Self::bind)
     /// otherwise.
     ///
+    /// # Errors
+    ///
+    /// Returns [`BindError::UnknownLabelId`] if `label_id` was not interned.
+    ///
+    /// Returns [`BindError::LabelMismatch`] when `label` does not match the
+    /// canonical representation stored in the interner.
+    ///
     /// # Panics
     ///
     /// Propagates the same panics as [`bind`](Self::bind) when the referenced
     /// vertices are missing or the branches bookkeeping becomes inconsistent.
     #[inline]
-    pub fn bind_with_label_id(&mut self, v1: usize, v2: usize, label_id: LabelId, label: Label) {
-        self.bind_preinterned(v1, v2, label_id, label);
+    pub fn bind_with_label_id(
+        &mut self,
+        v1: usize,
+        v2: usize,
+        label_id: LabelId,
+        label: Label,
+    ) -> Result<(), BindError> {
+        self.bind_preinterned(v1, v2, label_id, label)
     }
 
-    fn bind_preinterned(&mut self, v1: usize, v2: usize, label_id: LabelId, label: Label) {
+    fn bind_preinterned(
+        &mut self,
+        v1: usize,
+        v2: usize,
+        label_id: LabelId,
+        label: Label,
+    ) -> Result<(), BindError> {
+        let canonical = self
+            .labels
+            .canonical_label(label_id)
+            .copied()
+            .ok_or(BindError::UnknownLabelId(label_id))?;
+        if canonical != label {
+            return Err(BindError::LabelMismatch {
+                expected: canonical,
+                provided: label,
+            });
+        }
+        self.bind_canonical(v1, v2, label_id, canonical);
+        Ok(())
+    }
+
+    fn bind_canonical(&mut self, v1: usize, v2: usize, label_id: LabelId, label: Label) {
         #[cfg(debug_assertions)]
         if let Some(resolved) = self.labels.resolve(label_id) {
             debug_assert_eq!(resolved, label.to_string());
@@ -875,8 +940,62 @@ mod tests {
         assert!(g.label_id(&label).is_none());
         let label_id = g.intern_label(&label).unwrap();
         assert_eq!(Some(label_id), g.label_id(&label));
-        g.bind_with_label_id(0, 1, label_id, label);
+        assert!(g.bind_with_label_id(0, 1, label_id, label).is_ok());
         assert_eq!(Some(1), g.kid(0, label));
+    }
+
+    #[test]
+    fn bind_with_preinterned_label_id_rejects_unknown_identifier() {
+        let mut g: Sodg<16> = Sodg::empty(16);
+        g.add(0);
+        g.add(1);
+        let error = g
+            .bind_with_label_id(0, 1, 99, Label::Alpha(0))
+            .expect_err("unknown label id must yield an error");
+        assert!(matches!(error, BindError::UnknownLabelId(99)));
+    }
+
+    #[test]
+    fn bind_with_preinterned_label_id_validates_canonical_label() {
+        let mut g: Sodg<16> = Sodg::empty(16);
+        g.add(0);
+        g.add(1);
+        let canonical = Label::from_str("edge").unwrap();
+        let label_id = g.intern_label(&canonical).unwrap();
+        let mismatched = Label::Alpha(7);
+        let error = g
+            .bind_with_label_id(0, 1, label_id, mismatched)
+            .expect_err("mismatched label must be rejected");
+        assert!(matches!(
+            error,
+            BindError::LabelMismatch {
+                expected,
+                provided,
+            } if expected == canonical && provided == mismatched
+        ));
+    }
+
+    #[test]
+    fn bind_updates_existing_edge_with_canonical_label() {
+        let mut g: Sodg<16> = Sodg::empty(16);
+        g.add(0);
+        g.add(1);
+        g.add(2);
+        let padded = Label::Str(['f', 'o', 'o', ' ', ' ', ' ', ' ', ' ']);
+        let canonical = Label::from_str("foo").unwrap();
+        let label_id = g.intern_label(&padded).unwrap();
+        g.bind_with_label_id(0, 1, label_id, padded)
+            .expect("initial bind must succeed");
+        g.bind_with_label_id(0, 2, label_id, canonical)
+            .expect("rebinding must succeed");
+        let vertex = g.vertices.get(0).unwrap();
+        let edge = vertex
+            .edges
+            .iter()
+            .find(|edge| edge.label_id == label_id)
+            .expect("edge must exist");
+        assert_eq!(canonical, edge.label);
+        assert_eq!(2, edge.to);
     }
 
     #[test]

@@ -13,7 +13,7 @@
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter, Result as FmtResult};
 use std::hash::BuildHasherDefault;
-use std::str::Utf8Error;
+use std::str::{FromStr as _, Utf8Error};
 
 use itoa::Buffer as UsizeBuffer;
 use rustc_hash::FxHasher;
@@ -81,6 +81,7 @@ impl std::error::Error for LabelInternerError {}
 pub struct LabelInterner {
     forward: HashMap<LabelKey, LabelId, BuildHasherDefault<FxHasher>>,
     reverse: Vec<Box<str>>,
+    canonical: Vec<Label>,
     next: NextLabelId,
 }
 
@@ -130,6 +131,7 @@ impl LabelInterner {
             return Ok(id);
         }
         let owned = key.clone_into_boxed_str();
+        let canonical = Self::canonicalize_label(label)?;
         let id = self.next.allocate()?;
         let offset = id
             .checked_sub(1)
@@ -143,6 +145,7 @@ impl LabelInterner {
             return Err(LabelInternerError::CapacityExceeded);
         }
         self.reverse.push(owned);
+        self.canonical.push(canonical);
         self.forward.insert(key, id);
         Ok(id)
     }
@@ -210,17 +213,62 @@ impl LabelInterner {
         self.reverse.get(index).map(std::convert::AsRef::as_ref)
     }
 
+    /// Retrieve the canonical [`Label`] associated with the identifier.
+    ///
+    /// Returns [`None`] if the identifier is zero or has not been interned.
+    #[must_use]
+    pub fn canonical_label(&self, id: LabelId) -> Option<&Label> {
+        if id == 0 {
+            return None;
+        }
+        let offset = id.checked_sub(1)?;
+        let index = usize::try_from(offset).ok()?;
+        self.canonical.get(index)
+    }
+
+    fn canonicalize_label(label: &Label) -> Result<Label, LabelInternerError> {
+        match label {
+            Label::Greek(symbol) => Ok(Label::Greek(*symbol)),
+            Label::Alpha(index) => Ok(Label::Alpha(*index)),
+            Label::Str(chars) => {
+                let mut canonical = [' '; 8];
+                let mut position = 0_usize;
+                for &symbol in chars {
+                    if symbol == ' ' {
+                        continue;
+                    }
+                    if !symbol.is_ascii() {
+                        return Err(LabelInternerError::InvalidLabelCharacter(symbol));
+                    }
+                    if position >= canonical.len() {
+                        break;
+                    }
+                    canonical[position] = symbol;
+                    position += 1;
+                }
+                Ok(Label::Str(canonical))
+            }
+        }
+    }
+
     fn ensure_invariants(&self) -> Result<(), String> {
         let next = usize::try_from(self.next.0)
             .map_err(|_| "label identifier exceeds usize range".to_owned())?;
         if next == 0 {
             return Err("next identifier must remain non-zero".into());
         }
-        if next.saturating_sub(1) != self.reverse.len() {
+        let expected_len = next.saturating_sub(1);
+        if expected_len != self.reverse.len() {
             return Err("reverse table length does not match next id".into());
+        }
+        if expected_len != self.canonical.len() {
+            return Err("canonical label table length does not match next id".into());
         }
         if self.forward.len() != self.reverse.len() {
             return Err("forward map size does not match reverse table".into());
+        }
+        if self.reverse.len() != self.canonical.len() {
+            return Err("reverse and canonical tables length mismatch".into());
         }
         let mut seen = vec![false; self.reverse.len()];
         for (key, id) in &self.forward {
@@ -242,6 +290,13 @@ impl LabelInterner {
             if entry.as_ref() != expected {
                 return Err("forward and reverse entries mismatch".into());
             }
+            let canonical = self
+                .canonical
+                .get(index)
+                .ok_or_else(|| "missing canonical label".to_owned())?;
+            if canonical.to_string() != expected {
+                return Err("canonical label does not match stored text".into());
+            }
             if seen[index] {
                 return Err("duplicate identifier present".into());
             }
@@ -262,9 +317,10 @@ impl Serialize for LabelInterner {
         #[cfg(debug_assertions)]
         self.ensure_invariants()
             .map_err(serde::ser::Error::custom)?;
-        let mut state = serializer.serialize_struct("LabelInterner", 3)?;
+        let mut state = serializer.serialize_struct("LabelInterner", 4)?;
         state.serialize_field("forward", &self.forward)?;
         state.serialize_field("reverse", &self.reverse)?;
+        state.serialize_field("canonical", &self.canonical)?;
         state.serialize_field("next", &self.next)?;
         state.end()
     }
@@ -280,17 +336,32 @@ impl<'de> Deserialize<'de> for LabelInterner {
             forward: HashMap<LabelKey, LabelId, BuildHasherDefault<FxHasher>>,
             reverse: Vec<Box<str>>,
             #[serde(default)]
+            canonical: Vec<Label>,
+            #[serde(default)]
             next: NextLabelId,
         }
 
         let LabelInternerSerde {
             forward,
             reverse,
+            canonical,
             next,
         } = LabelInternerSerde::deserialize(deserializer)?;
+        let canonical = if canonical.is_empty() && !reverse.is_empty() {
+            let mut restored = Vec::with_capacity(reverse.len());
+            for text in &reverse {
+                let label = Label::from_str(text)
+                    .map_err(|error| serde::de::Error::custom(error.to_string()))?;
+                restored.push(label);
+            }
+            restored
+        } else {
+            canonical
+        };
         let interner = Self {
             forward,
             reverse,
+            canonical,
             next,
         };
         interner
@@ -524,5 +595,21 @@ mod tests {
         assert_eq!(Some(original), restored.get(&label));
         let reused = restored.get_or_intern(&label).unwrap();
         assert_eq!(original, reused);
+    }
+
+    #[test]
+    fn canonical_label_returns_structured_variant() {
+        let mut interner = LabelInterner::default();
+        let original = Label::Str(['f', 'o', 'o', ' ', ' ', ' ', ' ', ' ']);
+        let id = interner.get_or_intern(&original).unwrap();
+        let canonical = interner.canonical_label(id).copied();
+        assert_eq!(Some(Label::from_str("foo").unwrap()), canonical);
+    }
+
+    #[test]
+    fn canonical_label_is_none_for_unknown_identifier() {
+        let interner = LabelInterner::default();
+        assert!(interner.canonical_label(0).is_none());
+        assert!(interner.canonical_label(42).is_none());
     }
 }
