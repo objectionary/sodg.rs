@@ -148,4 +148,3 @@ criterion_group!(
     targets = bench_add_vertices, bench_bind_edges, bench_put, bench_put_and_data,
 );
 criterion_main!(benches);
-
