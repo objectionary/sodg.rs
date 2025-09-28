@@ -33,7 +33,7 @@
 //! let mut sodg : Sodg<16> = Sodg::empty(256);
 //! sodg.add(0);
 //! sodg.add(1);
-//! sodg.bind(0, 1, Label::from_str("foo").unwrap());
+//! sodg.bind(0, 1, Label::from_str("foo").unwrap()).unwrap();
 //! ```
 
 #![doc(html_root_url = "https://docs.rs/sodg/0.0.0")]
@@ -143,9 +143,9 @@ pub struct Script {
 /// let mut sodg : Sodg<16> = Sodg::empty(256);
 /// sodg.add(0);
 /// sodg.add(1);
-/// sodg.bind(0, 1, Label::Alpha(0));
+/// sodg.bind(0, 1, Label::Alpha(0)).unwrap();
 /// sodg.add(2);
-/// sodg.bind(1, 2, Label::Alpha(1));
+/// sodg.bind(1, 2, Label::Alpha(1)).unwrap();
 /// assert_eq!(1, sodg.kids(0).count());
 /// assert_eq!(1, sodg.kids(1).count());
 /// ```

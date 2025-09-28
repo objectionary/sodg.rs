@@ -101,7 +101,7 @@ impl Script {
                 let v1 = self.parse(args.first().context("V1 is expected")?, g)?;
                 let v2 = self.parse(args.get(1).context("V2 is expected")?, g)?;
                 let a = Label::from_str(args.get(2).context("Label is expected")?.as_str())?;
-                g.bind(v1, v2, a);
+                g.bind(v1, v2, a).unwrap();
             }
             "PUT" => {
                 let v = self.parse(args.first().context("V is expected")?, g)?;

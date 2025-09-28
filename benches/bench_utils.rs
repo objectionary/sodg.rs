@@ -80,7 +80,7 @@ pub(crate) fn dense_graph_with_locator<const N: usize>(
     let mut locator = String::new();
     for segment in 0..depth {
         let main_label = Label::Alpha(segment);
-        graph.bind(current, next_vertex, main_label);
+        graph.bind(current, next_vertex, main_label).unwrap();
         if !locator.is_empty() {
             locator.push('.');
         }
@@ -89,7 +89,7 @@ pub(crate) fn dense_graph_with_locator<const N: usize>(
         let _ = write!(locator, "{}", main_label);
         for filler in 1..degree {
             let filler_label = Label::Alpha(segment + filler * depth);
-            graph.bind(current, next_vertex + filler, filler_label);
+            graph.bind(current, next_vertex + filler, filler_label).unwrap();
         }
         current = next_vertex;
         next_vertex += degree.max(1);

@@ -26,7 +26,7 @@ mod tests {
         let mut g: Sodg<16> = Sodg::empty(256);
         g.add(1);
         g.add(42);
-        g.bind(1, 42, Label::Alpha(0));
+        g.bind(1, 42, Label::Alpha(0)).unwrap();
         let c = g.clone();
         assert_eq!(2, c.len());
     }

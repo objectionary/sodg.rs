@@ -70,7 +70,7 @@ mod tests {
         g.put(0, &Hex::from_str_bytes("hello"));
         g.add(1);
         let txt = g.inspect(0).unwrap();
-        g.bind(0, 1, Label::Alpha(0));
+        g.bind(0, 1, Label::Alpha(0)).unwrap();
         assert_ne!(String::new(), txt);
     }
 }
