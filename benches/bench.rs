@@ -5,7 +5,7 @@
 
 use std::hint::black_box;
 
-use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion, Throughput};
+use criterion::{BatchSize, BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use sodg::{Hex, Label, Sodg};
 
 /// Build a graph pre-sized to `n` and pre-filled with vertex IDs [0, n).
