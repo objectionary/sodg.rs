@@ -63,12 +63,16 @@ fn bench_bind_edges(c: &mut Criterion) {
             b.iter(|| {
                 for i in 0..size - 1 {
                     if i % 16 != 0 {
-                        black_box(graph.bind_with_label_id(
-                            black_box(i),
-                            black_box(i + 1),
-                            black_box(label_id),
-                            black_box(label),
-                        ));
+                        black_box(
+                            graph
+                                .bind_with_label_id(
+                                    black_box(i),
+                                    black_box(i + 1),
+                                    black_box(label_id),
+                                    black_box(label),
+                                )
+                                .expect("benchmark label must remain interned"),
+                        );
                     }
                 }
                 black_box(&mut graph);
