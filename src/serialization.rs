@@ -135,7 +135,13 @@ mod tests {
         assert_eq!(vertex.edges.len(), vertex.index.len());
         for edge in &vertex.edges {
             let encoded = u32::try_from(edge.to).expect("vertex identifier fits into u32");
-            assert_eq!(Some(encoded), vertex.index.get(edge.label_id));
+            assert_eq!(
+                Some(encoded),
+                vertex
+                    .index
+                    .get(edge.label_id)
+                    .map(|entry| entry.destination),
+            );
             let label_text = after.edge_label_text(edge);
             let parsed = Label::from_str(label_text.as_ref()).expect("edge label parsed");
             assert_eq!(edge.to, after.kid(0, parsed).expect("kid found after load"));

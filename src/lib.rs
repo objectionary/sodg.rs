@@ -68,7 +68,7 @@ mod xml;
 
 pub use crate::labels::{LabelId, LabelInterner, LabelInternerError};
 pub use crate::ops::{BindError, KidRef};
-pub use edge_index::{Edge, EdgeIndex, SMALL_THRESHOLD};
+pub use edge_index::{Edge, EdgeIndex, EdgeIndexEntry, SMALL_THRESHOLD};
 
 const HEX_SIZE: usize = 8;
 const MAX_BRANCHES: usize = 16;
