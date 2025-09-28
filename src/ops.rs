@@ -339,13 +339,19 @@ impl<const N: usize> Sodg<N> {
             .canonical_label(label_id)
             .copied()
             .ok_or(BindError::UnknownLabelId(label_id))?;
-        if canonical != label {
+        let Ok(normalized) = LabelInterner::canonicalize(&label) else {
+            return Err(BindError::LabelMismatch {
+                expected: canonical,
+                provided: label,
+            });
+        };
+        if normalized != canonical {
             return Err(BindError::LabelMismatch {
                 expected: canonical,
                 provided: label,
             });
         }
-        self.bind_canonical(v1, v2, label_id, canonical);
+        self.bind_canonical(v1, v2, label_id, normalized);
         Ok(())
     }
 
@@ -966,6 +972,47 @@ mod tests {
         let error = g
             .bind_with_label_id(0, 1, label_id, mismatched)
             .expect_err("mismatched label must be rejected");
+        assert!(matches!(
+            error,
+            BindError::LabelMismatch {
+                expected,
+                provided,
+            } if expected == canonical && provided == mismatched
+        ));
+    }
+
+    #[test]
+    fn bind_with_preinterned_label_id_accepts_equivalent_text_with_spaces() {
+        let mut g: Sodg<16> = Sodg::empty(16);
+        g.add(0);
+        g.add(1);
+        let spaced = Label::from_str("foo bar").unwrap();
+        let canonical = LabelInterner::canonicalize(&spaced).unwrap();
+        let label_id = g.intern_label(&spaced).unwrap();
+        g.bind_with_label_id(0, 1, label_id, spaced)
+            .expect("label containing spaces must bind successfully");
+        assert_eq!(Some(1), g.kid(0, Label::from_str("foo bar").unwrap()));
+        let vertex = g.vertices.get(0).unwrap();
+        let edge = vertex
+            .edges
+            .iter()
+            .find(|edge| edge.label_id == label_id)
+            .expect("bound edge must exist");
+        assert_eq!(canonical, edge.label);
+    }
+
+    #[test]
+    fn bind_with_preinterned_label_id_rejects_incorrect_text_after_normalization() {
+        let mut g: Sodg<16> = Sodg::empty(16);
+        g.add(0);
+        g.add(1);
+        let spaced = Label::from_str("foo bar").unwrap();
+        let canonical = LabelInterner::canonicalize(&spaced).unwrap();
+        let label_id = g.intern_label(&spaced).unwrap();
+        let mismatched = Label::from_str("foo baz").unwrap();
+        let error = g
+            .bind_with_label_id(0, 1, label_id, mismatched)
+            .expect_err("mismatched label must still be rejected");
         assert!(matches!(
             error,
             BindError::LabelMismatch {
