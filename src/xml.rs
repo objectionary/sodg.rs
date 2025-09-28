@@ -20,8 +20,8 @@ impl<const N: usize> Sodg<N> {
     /// g.add(0);
     /// g.put(0, &Hex::from_str_bytes("hello"));
     /// g.add(1);
-    /// g.bind(0, 1, Label::from_str("foo").unwrap());
-    /// g.bind(0, 1, Label::from_str("bar").unwrap());
+    /// g.bind(0, 1, Label::from_str("foo").unwrap()).unwrap();
+    /// g.bind(0, 1, Label::from_str("bar").unwrap()).unwrap();
     /// let xml = g.to_xml().unwrap();
     /// println!("{}", xml);
     /// ```
@@ -99,7 +99,7 @@ mod tests {
         g.add(0);
         g.put(0, &Hex::from_str_bytes("hello"));
         g.add(1);
-        g.bind(0, 1, Label::from_str("foo").unwrap());
+        g.bind(0, 1, Label::from_str("foo").unwrap()).unwrap();
         let xml = g.to_xml().unwrap();
         let parser = sxd_document::parser::parse(xml.as_str()).unwrap();
         let doc = parser.as_document();

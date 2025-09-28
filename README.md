@@ -32,8 +32,8 @@ use sodg::{Hex, Label, Sodg};
 let mut g: Sodg<16> = Sodg::empty(256);
 g.add(0); // add a vertex no.0
 g.add(1); // add a vertex no.1
-g.bind(0, 1, Label::from_str("foo").unwrap()); // connect v0 to v1 with label "foo"
-g.bind(0, 1, Label::from_str("bar").unwrap()); // add another edge with label "bar"
+g.bind(0, 1, Label::from_str("foo").unwrap()).unwrap(); // connect v0 to v1 with label "foo"
+g.bind(0, 1, Label::from_str("bar").unwrap()).unwrap(); // add another edge with label "bar"
 g.put(1, &Hex::from_str_bytes("Hello, world!")); // attach data to v1
 ```
 

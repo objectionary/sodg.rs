@@ -36,6 +36,11 @@ fn edge_comparison_count() -> usize {
 pub enum BindError {
     /// The provided identifier does not exist in the [`LabelInterner`].
     UnknownLabelId(LabelId),
+    /// The label pool exhausted the representable [`LabelId`] range.
+    LabelInternerCapacity,
+    /// The supplied [`Label`] cannot be represented canonically because it contains an
+    /// unsupported character.
+    InvalidLabelCharacter(char),
     /// The supplied [`Label`] does not match the canonical representation of the identifier.
     LabelMismatch {
         /// Canonical label stored in the interner.
@@ -49,6 +54,10 @@ impl Display for BindError {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         match self {
             Self::UnknownLabelId(id) => write!(f, "label identifier {id} is not interned"),
+            Self::LabelInternerCapacity => f.write_str("label interner capacity exhausted"),
+            Self::InvalidLabelCharacter(ch) => {
+                write!(f, "label contains unsupported character '{ch}'")
+            }
             Self::LabelMismatch { expected, provided } => write!(
                 f,
                 "label {provided} does not match canonical representation {expected}"
@@ -58,6 +67,17 @@ impl Display for BindError {
 }
 
 impl std::error::Error for BindError {}
+
+impl From<LabelInternerError> for BindError {
+    fn from(error: LabelInternerError) -> Self {
+        match error {
+            LabelInternerError::CapacityExceeded => Self::LabelInternerCapacity,
+            LabelInternerError::InvalidLabelCharacter(symbol) => {
+                Self::InvalidLabelCharacter(symbol)
+            }
+        }
+    }
+}
 
 impl<const N: usize> Vertex<N> {
     fn update_existing_edge(
@@ -280,7 +300,7 @@ impl<const N: usize> Sodg<N> {
     /// let mut g : Sodg<16> = Sodg::empty(256);
     /// g.add(0);
     /// g.add(42);
-    /// g.bind(0, 42, Label::from_str("hello").unwrap());
+    /// g.bind(0, 42, Label::from_str("hello").unwrap()).unwrap();
     /// ```
     ///
     /// If vertex `v1` already exists in the graph, nothing will happen.
@@ -305,8 +325,8 @@ impl<const N: usize> Sodg<N> {
     /// let mut g : Sodg<16> = Sodg::empty(256);
     /// g.add(0);
     /// g.add(42);
-    /// g.bind(0, 42, Label::from_str("forward").unwrap());
-    /// g.bind(42, 0, Label::from_str("backward").unwrap());
+    /// g.bind(0, 42, Label::from_str("forward").unwrap()).unwrap();
+    /// g.bind(42, 0, Label::from_str("backward").unwrap()).unwrap();
     /// ```
     ///
     /// If an edge with this label already exists, it will be replaced with a new edge.
@@ -320,14 +340,17 @@ impl<const N: usize> Sodg<N> {
     /// The label `a` can't be empty. If it is empty, an `Err` will be returned.
     ///
     /// If alerts trigger any error, the error will be returned here.
+    /// # Errors
+    ///
+    /// Returns [`BindError::LabelInternerCapacity`] when the label interner cannot allocate a new
+    /// identifier.
+    ///
+    /// Returns [`BindError::InvalidLabelCharacter`] when the label contains characters that cannot
+    /// participate in the canonical UTF-8 representation.
     #[inline]
-    pub fn bind(&mut self, v1: usize, v2: usize, a: Label) {
-        let label_id = self
-            .labels
-            .get_or_intern(&a)
-            .expect("label interner capacity exhausted");
+    pub fn bind(&mut self, v1: usize, v2: usize, a: Label) -> Result<(), BindError> {
+        let label_id = self.labels.get_or_intern(&a).map_err(BindError::from)?;
         self.bind_with_label_id(v1, v2, label_id, a)
-            .expect("interned label must remain canonical");
     }
 
     /// Bind two vertices using an already interned label identifier.
@@ -343,6 +366,9 @@ impl<const N: usize> Sodg<N> {
     ///
     /// Returns [`BindError::LabelMismatch`] when `label` does not match the
     /// canonical representation stored in the interner.
+    ///
+    /// Returns [`BindError::InvalidLabelCharacter`] when `label` contains characters that cannot be
+    /// canonicalized.
     ///
     /// # Panics
     ///
@@ -371,11 +397,14 @@ impl<const N: usize> Sodg<N> {
             .canonical_label(label_id)
             .copied()
             .ok_or(BindError::UnknownLabelId(label_id))?;
-        let Ok(normalized) = LabelInterner::canonicalize(&label) else {
-            return Err(BindError::LabelMismatch {
-                expected: canonical,
-                provided: label,
-            });
+        let normalized = match LabelInterner::canonicalize(&label) {
+            Ok(value) => value,
+            Err(LabelInternerError::InvalidLabelCharacter(symbol)) => {
+                return Err(BindError::InvalidLabelCharacter(symbol));
+            }
+            Err(LabelInternerError::CapacityExceeded) => {
+                return Err(BindError::LabelInternerCapacity);
+            }
         };
         if normalized != canonical {
             return Err(BindError::LabelMismatch {
@@ -576,7 +605,7 @@ impl<const N: usize> Sodg<N> {
     /// let mut g : Sodg<16> = Sodg::empty(256);
     /// g.add(0);
     /// g.add(42);
-    /// g.bind(0, 42, Label::from_str("k").unwrap());
+    /// g.bind(0, 42, Label::from_str("k").unwrap()).unwrap();
     /// let kid = g.kids(0).next().unwrap();
     /// assert_eq!("k", kid.label().to_string());
     /// assert_eq!(42, kid.destination());
@@ -591,9 +620,9 @@ impl<const N: usize> Sodg<N> {
     /// let mut g : Sodg<16> = Sodg::empty(256);
     /// g.add(0);
     /// g.add(42);
-    /// g.bind(0, 42, Label::from_str("a").unwrap());
-    /// g.bind(0, 42, Label::from_str("b").unwrap());
-    /// g.bind(0, 42, Label::from_str("c").unwrap());
+    /// g.bind(0, 42, Label::from_str("a").unwrap()).unwrap();
+    /// g.bind(0, 42, Label::from_str("b").unwrap()).unwrap();
+    /// g.bind(0, 42, Label::from_str("c").unwrap()).unwrap();
     /// let mut names = g
     ///     .kids(0)
     ///     .map(|kid| kid.label().to_string())
@@ -629,7 +658,7 @@ impl<const N: usize> Sodg<N> {
     /// g.add(0);
     /// g.add(42);
     /// let k = Label::from_str("k").unwrap();
-    /// g.bind(0, 42, k);
+    /// g.bind(0, 42, k).unwrap();
     /// assert_eq!(42, g.kid(0, k).unwrap());
     /// ```
     ///
@@ -656,8 +685,8 @@ impl<const N: usize> Sodg<N> {
     /// g.add(0);
     /// g.add(1);
     /// g.add(2);
-    /// g.bind(0, 1, Label::from_str("foo").unwrap());
-    /// g.bind(1, 2, Label::from_str("bar").unwrap());
+    /// g.bind(0, 1, Label::from_str("foo").unwrap()).unwrap();
+    /// g.bind(1, 2, Label::from_str("bar").unwrap()).unwrap();
     /// assert_eq!(Some(2), g.find(0, "foo.bar"));
     /// assert_eq!(None, g.find(0, "foo.baz"));
     /// ```
@@ -697,7 +726,7 @@ impl<const N: usize> Sodg<N> {
 /// let mut graph: Sodg<16> = Sodg::empty(16);
 /// graph.add(0);
 /// graph.add(1);
-/// graph.bind(0, 1, Label::from_str("foo").unwrap());
+/// graph.bind(0, 1, Label::from_str("foo").unwrap()).unwrap();
 /// let kid = graph.kids(0).next().unwrap();
 /// assert_eq!("foo", kid.label().to_string());
 /// assert_eq!(1, kid.destination());
@@ -778,7 +807,7 @@ mod tests {
         g.add(2);
         for edge in 0..count {
             let destination = edge % 2 + 1;
-            g.bind(0, destination, Label::Alpha(edge));
+            g.bind(0, destination, Label::Alpha(edge)).unwrap();
         }
         g
     }
@@ -788,7 +817,7 @@ mod tests {
         let mut g: Sodg<16> = Sodg::empty(256);
         g.add(1);
         g.add(2);
-        g.bind(1, 2, Label::Alpha(0));
+        g.bind(1, 2, Label::Alpha(0)).unwrap();
         assert_eq!(2, g.len());
     }
 
@@ -797,17 +826,17 @@ mod tests {
         let mut g: Sodg<16> = Sodg::empty(256);
         g.add(1);
         g.add(2);
-        g.bind(1, 2, Label::Alpha(0));
+        g.bind(1, 2, Label::Alpha(0)).unwrap();
         assert_eq!(1, g.branches.get(1).unwrap().len());
         assert_eq!(2, g.branches.get(2).unwrap().len());
         g.put(2, &Hex::from(42));
         assert_eq!(&1, g.stores.get(2).unwrap());
         g.add(3);
-        g.bind(1, 3, Label::Alpha(1));
+        g.bind(1, 3, Label::Alpha(1)).unwrap();
         assert_eq!(3, g.branches.get(2).unwrap().len());
         g.add(4);
         g.add(5);
-        g.bind(4, 5, Label::Alpha(0));
+        g.bind(4, 5, Label::Alpha(0)).unwrap();
         assert_eq!(2, g.branches.get(3).unwrap().len());
         g.data(2);
         assert_eq!(0, g.branches.get(2).unwrap().len());
@@ -819,7 +848,7 @@ mod tests {
         g.add(1);
         g.add(2);
         let k = Label::from_str("hello").unwrap();
-        g.bind(1, 2, k);
+        g.bind(1, 2, k).unwrap();
         assert_eq!(2, g.kid(1, k).unwrap());
     }
 
@@ -829,9 +858,9 @@ mod tests {
         g.add(1);
         g.add(2);
         let first = Label::from_str("first").unwrap();
-        g.bind(1, 2, first);
+        g.bind(1, 2, first).unwrap();
         let second = Label::from_str("second").unwrap();
-        g.bind(1, 2, second);
+        g.bind(1, 2, second).unwrap();
         assert_eq!(2, g.kid(1, first).unwrap());
         assert_eq!(2, g.kid(1, second).unwrap());
     }
@@ -841,9 +870,9 @@ mod tests {
         let mut g: Sodg<16> = Sodg::empty(256);
         g.add(1);
         g.add(2);
-        g.bind(1, 2, Label::from_str("foo").unwrap());
+        g.bind(1, 2, Label::from_str("foo").unwrap()).unwrap();
         g.add(3);
-        g.bind(1, 3, Label::from_str("foo").unwrap());
+        g.bind(1, 3, Label::from_str("foo").unwrap()).unwrap();
         assert_eq!(3, g.kid(1, Label::from_str("foo").unwrap()).unwrap());
     }
 
@@ -852,7 +881,7 @@ mod tests {
         let mut g: Sodg<16> = Sodg::empty(256);
         g.add(0);
         g.add(1);
-        g.bind(0, 1, Label::from_str("x").unwrap());
+        g.bind(0, 1, Label::from_str("x").unwrap()).unwrap();
         assert!(g.kid(0, Label::from_str("ρ").unwrap()).is_none());
         assert!(g.kid(0, Label::from_str("σ").unwrap()).is_none());
     }
@@ -871,10 +900,10 @@ mod tests {
         let mut g: Sodg<16> = Sodg::empty(256);
         g.add(1);
         g.add(2);
-        g.bind(1, 2, Label::Alpha(0));
+        g.bind(1, 2, Label::Alpha(0)).unwrap();
         g.put(2, &Hex::from_str_bytes("hello"));
         g.add(3);
-        g.bind(1, 3, Label::Alpha(0));
+        g.bind(1, 3, Label::Alpha(0)).unwrap();
         assert_eq!(3, g.len());
         assert_eq!(3, g.branches.get(2).unwrap().len());
         g.data(2);
@@ -887,8 +916,8 @@ mod tests {
         g.add(0);
         g.add(1);
         g.add(2);
-        g.bind(0, 1, Label::Alpha(0));
-        g.bind(1, 2, Label::Alpha(1));
+        g.bind(0, 1, Label::Alpha(0)).unwrap();
+        g.bind(1, 2, Label::Alpha(1)).unwrap();
         g.put(2, &Hex::from_str_bytes("payload"));
 
         assert!(g.kid(0, Label::Alpha(0)).is_some());
@@ -914,8 +943,8 @@ mod tests {
         let mut g: Sodg<16> = Sodg::empty(256);
         g.add(0);
         g.add(1);
-        g.bind(0, 1, Label::from_str("one").unwrap());
-        g.bind(0, 1, Label::from_str("two").unwrap());
+        g.bind(0, 1, Label::from_str("one").unwrap()).unwrap();
+        g.bind(0, 1, Label::from_str("two").unwrap()).unwrap();
         assert_eq!(2, g.kids(0).count());
         let mut names = vec![];
         for kid in g.kids(0) {
@@ -930,9 +959,9 @@ mod tests {
         let mut g: Sodg<16> = Sodg::empty(256);
         g.add(0);
         g.add(1);
-        g.bind(0, 1, Label::from_str("one").unwrap());
-        g.bind(0, 1, Label::from_str("two").unwrap());
-        g.bind(0, 1, Label::from_str("three").unwrap());
+        g.bind(0, 1, Label::from_str("one").unwrap()).unwrap();
+        g.bind(0, 1, Label::from_str("two").unwrap()).unwrap();
+        g.bind(0, 1, Label::from_str("three").unwrap()).unwrap();
         let mut names: Vec<String> = g.kids(0).map(|kid| format!("{}", kid.label())).collect();
         names.sort();
         assert_eq!("one,three,two", names.join(","));
@@ -944,7 +973,7 @@ mod tests {
         g.add(0);
         for vertex in 1..=20 {
             g.add(vertex);
-            g.bind(0, vertex, Label::Alpha(vertex));
+            g.bind(0, vertex, Label::Alpha(vertex)).unwrap();
         }
         let branch = g.vertices.get(0).unwrap().branch;
         let members = g.branches.get(branch).unwrap();
@@ -1025,6 +1054,32 @@ mod tests {
     }
 
     #[test]
+    fn bind_rejects_labels_with_non_ascii_characters() {
+        let mut g: Sodg<16> = Sodg::empty(16);
+        g.add(0);
+        g.add(1);
+        let label = Label::from_str("λβ").unwrap();
+        let error = g
+            .bind(0, 1, label)
+            .expect_err("labels containing unsupported characters must be rejected");
+        assert!(matches!(error, BindError::InvalidLabelCharacter('λ')));
+    }
+
+    #[test]
+    fn bind_with_label_id_propagates_invalid_character_errors() {
+        let mut g: Sodg<16> = Sodg::empty(16);
+        g.add(0);
+        g.add(1);
+        let canonical = Label::from_str("edge").unwrap();
+        let label_id = g.intern_label(&canonical).unwrap();
+        let invalid = Label::from_str("λβ").unwrap();
+        let error = g
+            .bind_with_label_id(0, 1, label_id, invalid)
+            .expect_err("invalid characters must be reported consistently");
+        assert!(matches!(error, BindError::InvalidLabelCharacter('λ')));
+    }
+
+    #[test]
     fn bind_with_preinterned_label_id_accepts_equivalent_text_with_spaces() {
         let mut g: Sodg<16> = Sodg::empty(16);
         g.add(0);
@@ -1096,7 +1151,7 @@ mod tests {
         for label_idx in 0..EDGE_COUNT {
             let destination = label_idx + 1;
             g.add(destination);
-            g.bind(0, destination, Label::Alpha(label_idx));
+            g.bind(0, destination, Label::Alpha(label_idx)).unwrap();
         }
         for label_idx in 0..EDGE_COUNT {
             assert_eq!(Some(label_idx + 1), g.kid(0, Label::Alpha(label_idx)));
@@ -1110,7 +1165,7 @@ mod tests {
         for label_idx in 0..SMALL_THRESHOLD {
             let destination = label_idx + 1;
             g.add(destination);
-            g.bind(0, destination, Label::Alpha(label_idx));
+            g.bind(0, destination, Label::Alpha(label_idx)).unwrap();
         }
         assert!(matches!(
             g.vertices.get(0).unwrap().index,
@@ -1122,7 +1177,7 @@ mod tests {
             let before = super::edge_comparison_count();
             let new_destination = SMALL_THRESHOLD + 1 + label_idx;
             g.add(new_destination);
-            g.bind(0, new_destination, Label::Alpha(label_idx));
+            g.bind(0, new_destination, Label::Alpha(label_idx)).unwrap();
             let after = super::edge_comparison_count();
             assert_eq!(label_idx + 1, after - before);
             assert_eq!(Some(new_destination), g.kid(0, Label::Alpha(label_idx)));
@@ -1185,7 +1240,8 @@ mod tests {
                 idx,
                 idx + 1,
                 Label::from_str(text).expect("valid label for traversal test"),
-            );
+            )
+            .unwrap();
         }
         assert_eq!(Some(labels.len()), g.find(0, "s0.s1.s2.s3.s4"));
         assert!(g.find(0, "s0.s1.s2.s3.missing").is_none());
@@ -1218,8 +1274,8 @@ mod tests {
         g.add(0);
         g.add(1);
         g.add(2);
-        g.bind(0, 1, Label::from_str("foo").unwrap());
-        g.bind(1, 2, Label::from_str("bar").unwrap());
+        g.bind(0, 1, Label::from_str("foo").unwrap()).unwrap();
+        g.bind(1, 2, Label::from_str("bar").unwrap()).unwrap();
         assert_eq!(Some(2), g.find(0, "foo.bar"));
         assert_eq!(Some(1), g.find(0, "foo"));
         assert_eq!(Some(0), g.find(0, ""));
@@ -1230,7 +1286,7 @@ mod tests {
         let mut g: Sodg<16> = Sodg::empty(256);
         g.add(0);
         g.add(1);
-        g.bind(0, 1, Label::from_str("foo").unwrap());
+        g.bind(0, 1, Label::from_str("foo").unwrap()).unwrap();
         assert!(g.find(0, "foo.bar").is_none());
         assert!(g.find(0, "..foo").is_none());
     }

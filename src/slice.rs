@@ -75,7 +75,7 @@ impl<const N: usize> Sodg<N> {
                     let label = self.edge_label_text(edge).into_owned();
                     let parsed = Label::from_str(label.as_str())
                         .with_context(|| format!("Failed to rebuild label '{label}'"))?;
-                    ng.bind(v1, edge.to, parsed);
+                    ng.bind(v1, edge.to, parsed)?;
                 }
             }
         }
@@ -99,9 +99,9 @@ mod tests {
         let mut g: Sodg<16> = Sodg::empty(256);
         g.add(0);
         g.add(1);
-        g.bind(0, 1, Label::from_str("foo").unwrap());
+        g.bind(0, 1, Label::from_str("foo").unwrap()).unwrap();
         g.add(2);
-        g.bind(0, 2, Label::from_str("bar").unwrap());
+        g.bind(0, 2, Label::from_str("bar").unwrap()).unwrap();
         assert_eq!(1, g.slice(1).unwrap().len());
         assert_eq!(1, g.slice(2).unwrap().len());
     }
@@ -111,9 +111,9 @@ mod tests {
         let mut g: Sodg<16> = Sodg::empty(256);
         g.add(0);
         g.add(1);
-        g.bind(0, 1, Label::from_str("foo").unwrap());
+        g.bind(0, 1, Label::from_str("foo").unwrap()).unwrap();
         g.add(2);
-        g.bind(1, 2, Label::from_str("bar").unwrap());
+        g.bind(1, 2, Label::from_str("bar").unwrap()).unwrap();
         let slice = g.slice_some(1, |_v, _to, _a| false).unwrap();
         assert_eq!(1, slice.len());
     }
@@ -123,9 +123,9 @@ mod tests {
         let mut g: Sodg<16> = Sodg::empty(256);
         g.add(0);
         g.add(1);
-        g.bind(0, 1, Label::from_str("foo").unwrap());
+        g.bind(0, 1, Label::from_str("foo").unwrap()).unwrap();
         g.add(2);
-        g.bind(0, 2, Label::from_str("+bar").unwrap());
+        g.bind(0, 2, Label::from_str("+bar").unwrap()).unwrap();
         let slice = g.slice_some(0, |_, _, a| !a.starts_with('+')).unwrap();
         assert_eq!(2, slice.len());
         assert_eq!(1, slice.kids(0).count());

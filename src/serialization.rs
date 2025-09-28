@@ -90,7 +90,7 @@ mod tests {
         let mut g: Sodg<16> = Sodg::empty(256);
         g.add(0);
         g.add(1);
-        g.bind(0, 1, Label::from_str("foo").unwrap());
+        g.bind(0, 1, Label::from_str("foo").unwrap()).unwrap();
         let tmp = TempDir::new().unwrap();
         let file = tmp.path().join("foo.sodg");
         g.save(file.as_path()).unwrap();
@@ -104,7 +104,7 @@ mod tests {
         g.put(0, &Hex::from_str_bytes("hello"));
         g.add(1);
         let label = Label::from_str("foo").unwrap();
-        g.bind(0, 1, label);
+        g.bind(0, 1, label).unwrap();
         let tmp = TempDir::new().unwrap();
         let file = tmp.path().join("foo.sodg");
         g.save(file.as_path()).unwrap();
@@ -124,7 +124,7 @@ mod tests {
         g.add(2);
         for idx in 0..(SMALL_THRESHOLD + 3) {
             let destination = idx % 2 + 1;
-            g.bind(0, destination, Label::Alpha(idx));
+            g.bind(0, destination, Label::Alpha(idx)).unwrap();
         }
         let tmp = TempDir::new().unwrap();
         let file = tmp.path().join("roundtrip.sodg");

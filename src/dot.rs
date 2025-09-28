@@ -18,8 +18,8 @@ impl<const N: usize> Sodg<N> {
     /// g.add(0);
     /// g.put(0, &Hex::from_str_bytes("hello"));
     /// g.add(1);
-    /// g.bind(0, 1, Label::from_str("foo").unwrap());
-    /// g.bind(0, 1, Label::from_str("bar").unwrap());
+    /// g.bind(0, 1, Label::from_str("foo").unwrap()).unwrap();
+    /// g.bind(0, 1, Label::from_str("bar").unwrap()).unwrap();
     /// let dot = g.to_dot();
     /// println!("{}", dot);
     /// ```
@@ -98,7 +98,7 @@ fn simple_graph_to_dot() {
     g.add(0);
     g.put(0, &Hex::from_str_bytes("hello"));
     g.add(1);
-    g.bind(0, 1, Label::Alpha(0));
+    g.bind(0, 1, Label::Alpha(0)).unwrap();
     let dot = g.to_dot();
     assert!(dot.contains("shape=circle,label=\"ν0\""));
 }
