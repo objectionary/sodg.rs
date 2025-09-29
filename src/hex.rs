@@ -832,6 +832,19 @@ mod tests {
     }
 
     #[test]
+    fn concatenates_bytes_with_long_vector_without_padding() {
+        let bytes = Hex::from_slice(&[0xAB, 0xCD]);
+        let vector = Hex::from_vec((1..=16).map(|value| value as u8).collect());
+        let result = bytes.concat(&vector);
+        let mut expected = Vec::with_capacity(bytes.len() + vector.len());
+        expected.extend_from_slice(bytes.bytes());
+        expected.extend_from_slice(vector.bytes());
+        assert_eq!(result.len(), expected.len());
+        assert_eq!(result.bytes()[2], 0x01);
+        assert_eq!(result.bytes(), expected.as_slice());
+    }
+
+    #[test]
     fn creates_from_big_slice() {
         let s: [u8; 9] = [0xAB, 0xD8, 0xAB, 0xD8, 0xAB, 0xD8, 0xAB, 0xD8, 0xAB];
         let mut accum = vec![];

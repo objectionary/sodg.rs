@@ -1,13 +1,12 @@
 // SPDX-FileCopyrightText: Copyright (c) 2022-2025 Objectionary.com
 // SPDX-License-Identifier: MIT
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::str::FromStr as _;
-use std::sync::LazyLock as Lazy;
 
 use anyhow::{Context as _, Result, bail};
 use log::trace;
-use regex::Regex;
 
 use crate::{Hex, Script};
 use crate::{Label, Sodg};
@@ -54,7 +53,7 @@ impl Script {
     pub fn deploy_to<const N: usize>(&mut self, g: &mut Sodg<N>) -> Result<usize> {
         self.vars.clear();
         let mut pos = 0;
-        for cmd in &self.commands() {
+        for cmd in commands.split(';').map(str::trim).filter(|t| !t.is_empty()) {
             trace!("#deploy_to: deploying command no.{} '{}'...", pos + 1, cmd);
             self.deploy_one(cmd, g)
                 .with_context(|| format!("Failure at the command no.{pos}: '{cmd}'"))?;
@@ -74,6 +73,7 @@ impl Script {
             .filter(|t| !t.is_empty())
             .map(ToString::to_string)
             .collect()
+
     }
 
     /// Deploy a single command to the [`Sodg`].
@@ -82,17 +82,21 @@ impl Script {
     ///
     /// If impossible to deploy, an error will be returned.
     fn deploy_one<const N: usize>(&mut self, cmd: &str, g: &mut Sodg<N>) -> Result<()> {
-        static LINE: Lazy<Regex> = Lazy::new(|| Regex::new("^([A-Z]+) *\\(([^)]*)\\)$").unwrap());
-        let cap = LINE
-            .captures(cmd)
+        let (name, rest) = cmd
+            .split_once('(')
             .with_context(|| format!("Can't parse '{cmd}'"))?;
-        let args: Vec<String> = cap[2]
+        let trimmed_name = name.trim();
+        let arguments = rest
+            .rfind(')')
+            .map(|idx| &rest[..idx])
+            .context("Missing closing parenthesis")?;
+        let args: Vec<String> = arguments
             .split(',')
             .map(str::trim)
             .filter(|t| !t.is_empty())
             .map(ToString::to_string)
             .collect();
-        match &cap[1] {
+        match trimmed_name {
             "ADD" => {
                 let v = self.parse(args.first().context("V is expected")?, g)?;
                 g.add(v);
@@ -121,12 +125,28 @@ impl Script {
     ///
     /// If impossible to parse, an error will be returned.
     fn parse_data(s: &str) -> Result<Hex> {
-        static DATA_STRIP: Lazy<Regex> = Lazy::new(|| Regex::new("[ \t\n\r\\-]").unwrap());
-        static DATA: Lazy<Regex> =
-            Lazy::new(|| Regex::new("^[0-9A-Fa-f]{2}([0-9A-Fa-f]{2})*$").unwrap());
-        let d: &str = &DATA_STRIP.replace_all(s, "");
-        if !DATA.is_match(d) {
-            bail!("Can't parse data '{s}'");
+        let cleaned: Cow<'_, str> = if s
+            .chars()
+            .any(|c| matches!(c, ' ' | '\t' | '\n' | '\r' | '-'))
+        {
+            Cow::Owned(
+                s.chars()
+                    .filter(|c| !matches!(c, ' ' | '\t' | '\n' | '\r' | '-'))
+                    .collect(),
+            )
+        } else {
+            Cow::Borrowed(s)
+        };
+        if !cleaned.len().is_multiple_of(2) {
+            bail!("Can't parse data '{s}': odd number of hexadecimal digits");
+        }
+        let mut bytes = Vec::with_capacity(cleaned.len() / 2);
+        for (chunk_index, chunk) in cleaned.as_bytes().chunks_exact(2).enumerate() {
+            let byte = Self::parse_hex_pair(chunk).with_context(|| {
+                let pos = chunk_index * 2;
+                format!("Can't parse data '{s}' at position {pos}")
+            })?;
+            bytes.push(byte);
         }
         let mut bytes = Vec::with_capacity(d.len() / 2);
         for i in (0..d.len()).step_by(2) {
@@ -160,6 +180,23 @@ impl Script {
         } else {
             let v = usize::from_str(s).with_context(|| format!("Parsing of '{s}' failed"))?;
             Ok(v)
+        }
+    }
+
+    fn parse_hex_pair(pair: &[u8]) -> Result<u8> {
+        let high = Self::parse_hex_digit(pair[0])
+            .with_context(|| format!("Invalid hexadecimal digit '{}'", char::from(pair[0])))?;
+        let low = Self::parse_hex_digit(pair[1])
+            .with_context(|| format!("Invalid hexadecimal digit '{}'", char::from(pair[1])))?;
+        Ok((high << 4) | low)
+    }
+
+    const fn parse_hex_digit(digit: u8) -> Option<u8> {
+        match digit {
+            b'0'..=b'9' => Some(digit - b'0'),
+            b'a'..=b'f' => Some(digit - b'a' + 10),
+            b'A'..=b'F' => Some(digit - b'A' + 10),
+            _ => None,
         }
     }
 }
@@ -213,5 +250,30 @@ mod tests {
         script.deploy_to(&mut g).unwrap();
         assert_eq!(initial_len + 1, g.len());
         assert!(g.keys().contains(&2));
+    }
+
+    #[test]
+    fn trailing_comment_without_newline() {
+        let mut g: Sodg<16> = Sodg::empty(256);
+        let mut s = Script::from_str("ADD(0);\n# trailing comment");
+        let total = s.deploy_to(&mut g).unwrap();
+        assert_eq!(1, total);
+    }
+
+    #[test]
+    fn parse_data_supports_mixed_formatting() {
+        let hex = Script::parse_data("FF-00 0A\n0B").unwrap();
+        assert_eq!(hex.bytes(), &[0xFF, 0x00, 0x0A, 0x0B]);
+    }
+
+    #[test]
+    fn parse_data_rejects_invalid_digit() {
+        assert!(Script::parse_data("ZZ").is_err());
+    }
+
+    #[test]
+    fn strip_comments_removes_entire_comment_line() {
+        let cleaned = Script::strip_comments("ADD(0);\n# comment\nADD(1);");
+        assert_eq!(cleaned, "ADD(0);\nADD(1);");
     }
 }

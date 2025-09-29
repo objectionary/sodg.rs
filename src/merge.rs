@@ -57,17 +57,15 @@ impl<const N: usize> Sodg<N> {
         Ok(())
     }
 
-    /// Merge two trees recursively, ignoring the nodes already `mapped`.
+    /// Merge two trees recursively, ignoring nodes already in `mapped`.
     ///
-    /// The `right` vertex is mapped to the `left` vertex. The decisions about
-    /// their kids are made recursively.
+    /// `right` vertex (from `g`) is mapped onto `left` vertex (in `self`).
+    /// Children decisions are made recursively.
     ///
-    /// The `mapped` is a key-value map, where the key is a vertex from the right
-    /// graph, which is mapped to a vertex from the left graph.
+    /// `mapped`: key is a vertex from the right graph, value is the mapped vertex in the left graph.
     ///
     /// # Errors
-    ///
-    /// If it's impossible to merge, an error will be returned.
+    /// Returns an error if merge is impossible (e.g., missing vertex).
     #[allow(clippy::option_if_let_else)]
     fn merge_rec(
         &mut self,
@@ -77,12 +75,24 @@ impl<const N: usize> Sodg<N> {
         mapped: &mut HashMap<usize, usize>,
         label_mappings: &mut HashMap<LabelId, (LabelId, Label)>,
     ) -> Result<()> {
+        // If already mapped, nothing to do
         if mapped.contains_key(&right) {
             return Ok(());
         }
+
+        // Record mapping early to avoid cycles re-entering here
         mapped.insert(right, left);
-        if g.vertices.get(right).unwrap().persistence != Persistence::Empty {
-            self.put(left, &g.vertices.get(right).unwrap().data);
+
+        // Access vertex safely
+        let v = g
+            .vertices
+            .get(right)
+            .with_context(|| format!("Can't find ν{right}"))?;
+
+        // Merge payload if present
+        if v.persistence != Persistence::Empty {
+            // put: merges data from right into left
+            self.put(left, &v.data);
         }
         for kid in g.kids(right) {
             let label = *kid.label();
@@ -114,6 +124,7 @@ impl<const N: usize> Sodg<N> {
                 self.join(first, *second)?;
             }
         }
+
         Ok(())
     }
 
@@ -235,6 +246,19 @@ mod tests {
         assert!(r.is_err());
         let msg = r.err().unwrap().to_string();
         assert!(msg.contains("ν2, ν13, ν42"), "{}", msg);
+    }
+
+    #[test]
+    fn reports_missing_vertex() {
+        let mut g: Sodg<16> = Sodg::empty(256);
+        g.add(0);
+        let mut extra = Sodg::empty(2);
+        let missing = 1;
+        extra.vertices.remove(missing);
+        let error = g.merge(&extra, 0, missing).unwrap_err();
+        let message = error.to_string();
+        let expected = format!("Can't find ν{missing}");
+        assert!(message.contains(&expected), "{message}");
     }
 
     #[test]

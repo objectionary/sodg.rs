@@ -73,4 +73,15 @@ mod tests {
         g.bind(0, 1, Label::Alpha(0)).unwrap();
         assert_ne!(String::new(), txt);
     }
+
+    #[test]
+    fn inspect_errors_if_child_vertex_missing() {
+        let mut g: Sodg<16> = Sodg::empty(256);
+        g.add(0);
+        g.add(1);
+        g.bind(0, 1, Label::Alpha(0));
+        g.vertices.remove(1);
+        let result = g.inspect(0);
+        assert!(result.is_err());
+    }
 }

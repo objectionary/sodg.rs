@@ -29,8 +29,9 @@
 //!
 //! ```
 //! use std::str::FromStr as _;
+//!
 //! use sodg::{Label, Sodg};
-//! let mut sodg : Sodg<16> = Sodg::empty(256);
+//! let mut sodg: Sodg<16> = Sodg::empty(256);
 //! sodg.add(0);
 //! sodg.add(1);
 //! sodg.bind(0, 1, Label::from_str("foo").unwrap()).unwrap();
@@ -53,6 +54,7 @@ mod ctors;
 mod debug;
 mod dot;
 mod edge_index;
+mod find;
 mod hex;
 mod inspect;
 mod label;
@@ -140,7 +142,7 @@ pub struct Script {
 ///
 /// ```
 /// use sodg::{Label, Sodg};
-/// let mut sodg : Sodg<16> = Sodg::empty(256);
+/// let mut sodg: Sodg<16> = Sodg::empty(256);
 /// sodg.add(0);
 /// sodg.add(1);
 /// sodg.bind(0, 1, Label::Alpha(0)).unwrap();
