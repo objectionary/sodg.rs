@@ -3,7 +3,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use log::debug;
 
 use crate::{Label, LabelId, Persistence, Sodg};

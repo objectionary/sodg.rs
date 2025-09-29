@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2022-2025 Objectionary.com
 // SPDX-License-Identifier: MIT
 
-use crate::Sodg;
+use crate::{BRANCH_NONE, Sodg};
 
 impl<const N: usize> Sodg<N> {
     /// Get next unique ID of a vertex.
@@ -14,16 +14,21 @@ impl<const N: usize> Sodg<N> {
     /// May panic if not enough IDs are available.
     #[inline]
     pub fn next_id(&mut self) -> usize {
+        let capacity = self.vertex_capacity;
         let mut id = self.next_v;
-        id = self
-            .vertices
-            .iter()
-            .find(|(v, vtx)| vtx.branch == 0 && *v >= id)
-            .map(|(v, _)| v)
-            .unwrap();
-        let next = id + 1;
-        if next > self.next_v {
-            self.next_v = next;
+        while id < capacity {
+            let available = self
+                .vertices
+                .get(id)
+                .is_none_or(|vertex| vertex.branch == BRANCH_NONE);
+            if available {
+                break;
+            }
+            id += 1;
+        }
+        assert!(id < capacity, "Not enough vertex identifiers available");
+        if id + 1 > self.next_v {
+            self.next_v = id + 1;
         }
         id
     }

@@ -3,9 +3,7 @@
 
 use emap::Map;
 
-use crate::{
-    BranchMembers, EdgeIndex, Hex, LabelInterner, MAX_BRANCHES, Persistence, Sodg, Vertex,
-};
+use crate::{BranchMembers, LabelInterner, MAX_BRANCHES, Sodg};
 
 impl<const N: usize> Sodg<N> {
     /// Make an empty [`Sodg`], with no vertices and no edges.
@@ -16,16 +14,8 @@ impl<const N: usize> Sodg<N> {
     #[must_use]
     pub fn empty(cap: usize) -> Self {
         let mut g = Self {
-            vertices: Map::with_capacity_some(
-                cap,
-                Vertex {
-                    branch: 0,
-                    data: Hex::empty(),
-                    persistence: Persistence::Empty,
-                    edges: Vec::new(),
-                    index: EdgeIndex::new(),
-                },
-            ),
+            vertex_capacity: cap,
+            vertices: Map::with_capacity_none(cap),
             stores: Map::with_capacity_some(MAX_BRANCHES, 0),
             branches: Map::with_capacity_some(MAX_BRANCHES, BranchMembers::new()),
             labels: LabelInterner::default(),

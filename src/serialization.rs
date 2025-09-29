@@ -6,6 +6,7 @@ use std::path::Path;
 use std::time::Instant;
 
 use anyhow::{Context as _, Result};
+use emap::Map;
 use log::trace;
 
 use crate::Sodg;
@@ -22,6 +23,20 @@ impl<const N: usize> Sodg<N> {
                 vertex.rebuild_index();
             }
         }
+    }
+
+    fn ensure_vertex_capacity(&mut self) {
+        if self.vertex_capacity == 0 {
+            self.vertex_capacity = self.vertices.capacity();
+        }
+        if self.vertices.capacity() == self.vertex_capacity {
+            return;
+        }
+        let mut resized = Map::with_capacity_none(self.vertex_capacity);
+        for (vertex_id, vertex) in self.vertices.iter() {
+            resized.insert(vertex_id, vertex.clone());
+        }
+        self.vertices = resized;
     }
 
     /// Save the entire [`Sodg`] into a binary file.
@@ -63,6 +78,7 @@ impl<const N: usize> Sodg<N> {
         let mut sodg: Self = bincode::serde::decode_from_slice(&bytes, bincode::config::legacy())
             .with_context(|| format!("Can't deserialize from {}", path.display()))?
             .0;
+        sodg.ensure_vertex_capacity();
         sodg.rebuild_edge_indexes();
         trace!(
             "Deserialized {} vertices ({} bytes) from {} in {:?}",
@@ -147,5 +163,32 @@ mod tests {
             assert_eq!(edge.to, after.kid(0, parsed).expect("kid found after load"));
             assert_eq!(Some(edge.label_id), after.labels.get(&edge.label));
         }
+    }
+
+    #[test]
+    fn loaded_graph_allows_new_vertices() {
+        let mut g: Sodg<4> = Sodg::empty(64);
+        g.add(0);
+        let tmp = TempDir::new().unwrap();
+        let file = tmp.path().join("extend.sodg");
+        g.save(file.as_path()).unwrap();
+        let mut after: Sodg<4> = Sodg::load(file.as_path()).unwrap();
+        let before_len = after.len();
+        after.add(3);
+        assert_eq!(before_len + 1, after.len());
+        assert!(after.vertices.get(3).is_some());
+    }
+
+    #[test]
+    fn restores_capacity_from_legacy_payload() {
+        let mut g: Sodg<8> = Sodg::empty(32);
+        g.add(0);
+        g.add(5);
+        g.vertex_capacity = 0;
+        g.ensure_vertex_capacity();
+        assert_eq!(32, g.vertex_capacity);
+        assert_eq!(g.vertex_capacity, g.vertices.capacity());
+        g.add(7);
+        assert!(g.vertices.get(7).is_some());
     }
 }
