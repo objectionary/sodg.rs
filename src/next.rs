@@ -17,10 +17,8 @@ impl<const N: usize> Sodg<N> {
         let capacity = self.vertex_capacity;
         let mut id = self.next_v;
         while id < capacity {
-            let available = self
-                .vertices
-                .get(id)
-                .is_none_or(|vertex| vertex.branch == BRANCH_NONE);
+            let available =
+                self.vertices.get(id).is_none_or(|vertex| vertex.branch == BRANCH_NONE);
             if available {
                 break;
             }

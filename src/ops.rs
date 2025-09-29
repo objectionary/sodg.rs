@@ -288,7 +288,10 @@ impl<const N: usize> Sodg<N> {
         collected
     }
 
-    fn edges_pointing_to(&self, targets: &FxHashSet<usize>) -> Vec<(usize, Vec<(LabelId, usize)>)> {
+    fn edges_pointing_to(
+        &self,
+        targets: &FxHashSet<usize>,
+    ) -> Vec<(usize, Vec<(LabelId, usize)>)> {
         if targets.is_empty() {
             return Vec::new();
         }
@@ -647,10 +650,7 @@ impl<const N: usize> Sodg<N> {
                 );
                 let data = vertex.data.clone();
                 vertex.persistence = Persistence::Taken;
-                RetrievalInfo::Stored {
-                    data,
-                    branch: vertex.branch,
-                }
+                RetrievalInfo::Stored { data, branch: vertex.branch }
             }
             Persistence::Taken => RetrievalInfo::Taken(vertex.data.clone()),
             Persistence::Empty => RetrievalInfo::Empty,
@@ -1162,19 +1162,13 @@ mod tests {
         let branch = g.vertices.get(1).unwrap().branch;
         assert_ne!(BRANCH_STATIC, branch);
 
-        let mut expected_members = g
-            .branches
-            .get(branch)
-            .unwrap()
-            .iter()
-            .copied()
-            .collect::<Vec<_>>();
+        let mut expected_members =
+            g.branches.get(branch).unwrap().iter().copied().collect::<Vec<_>>();
         let mut previous = 2;
         for vertex_id in 3..(3 + ADDITIONAL_MEMBERS) {
             g.add(vertex_id);
             g.bind(1, vertex_id, Label::Alpha(vertex_id)).unwrap();
-            g.bind(vertex_id, previous, Label::Alpha(vertex_id + 10_000))
-                .unwrap();
+            g.bind(vertex_id, previous, Label::Alpha(vertex_id + 10_000)).unwrap();
             previous = vertex_id;
         }
 
@@ -1191,21 +1185,14 @@ mod tests {
             g.bind(src, dst, Label::Alpha(offset + 20_000)).unwrap();
         }
 
-        let total_edges_before = g
-            .vertices
-            .iter()
-            .map(|(_, vertex)| vertex.edges.len())
-            .sum::<usize>();
+        let total_edges_before =
+            g.vertices.iter().map(|(_, vertex)| vertex.edges.len()).sum::<usize>();
 
         reset_membership_check_counter();
         let removed = g.cleanup_branch(branch);
 
         assert_eq!(expected_members, removed);
-        assert!(
-            g.branches
-                .get(branch)
-                .map_or(true, |members| members.is_empty())
-        );
+        assert!(g.branches.get(branch).map_or(true, |members| members.is_empty()));
         assert_eq!(Some(&0), g.stores.get(branch));
 
         for vertex in g.vertices.iter().map(|(_, vertex)| vertex) {
