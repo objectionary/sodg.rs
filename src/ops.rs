@@ -1,23 +1,24 @@
 // SPDX-FileCopyrightText: Copyright (c) 2022-2025 Objectionary.com
 // SPDX-License-Identifier: MIT
 
-use anyhow::Context as _;
-#[cfg(debug_assertions)]
-use log::trace;
-
 use std::borrow::Cow;
 use std::convert::TryFrom as _;
 use std::fmt::{Display, Formatter, Result as FmtResult};
 use std::str::FromStr as _;
+
+#[cfg(test)]
+use std::cell::Cell;
+
+use anyhow::Context as _;
+#[cfg(debug_assertions)]
+use log::trace;
+use rustc_hash::FxHashSet;
 
 use crate::{
     BRANCH_NONE, BRANCH_STATIC, Edge, EdgeIndex, EdgeIndexEntry, LabelId, Persistence, Sodg,
     Vertex,
 };
 use crate::{Hex, Label, LabelInterner, LabelInternerError};
-
-#[cfg(test)]
-use std::cell::Cell;
 
 #[cfg(test)]
 thread_local! {
@@ -32,6 +33,26 @@ fn reset_edge_comparison_counter() {
 #[cfg(test)]
 fn edge_comparison_count() -> usize {
     EDGE_COMPARISON_COUNTER.with(|counter| counter.get())
+}
+
+#[cfg(test)]
+thread_local! {
+    static MEMBERSHIP_CHECK_COUNTER: Cell<usize> = Cell::new(0);
+}
+
+#[cfg(test)]
+fn reset_membership_check_counter() {
+    MEMBERSHIP_CHECK_COUNTER.with(|counter| counter.set(0));
+}
+
+#[cfg(test)]
+fn membership_check_count() -> usize {
+    MEMBERSHIP_CHECK_COUNTER.with(|counter| counter.get())
+}
+
+#[cfg(test)]
+fn record_membership_check() {
+    MEMBERSHIP_CHECK_COUNTER.with(|counter| counter.set(counter.get() + 1));
 }
 
 /// Errors that may occur when binding vertices with pre-interned labels.
@@ -82,6 +103,16 @@ impl From<LabelInternerError> for BindError {
 }
 
 impl<const N: usize> Vertex<N> {
+    const fn new() -> Self {
+        Self {
+            branch: BRANCH_NONE,
+            data: Hex::empty(),
+            persistence: Persistence::Empty,
+            edges: Vec::new(),
+            index: EdgeIndex::new(),
+        }
+    }
+
     fn update_existing_edge(
         &mut self,
         label_id: LabelId,
@@ -145,6 +176,25 @@ impl<const N: usize> Sodg<N> {
         self.labels
             .resolve(edge.label_id)
             .map_or_else(|| Cow::Owned(edge.label.to_string()), Cow::Borrowed)
+    }
+
+    fn ensure_vertex<R>(
+        &mut self,
+        vertex_id: usize,
+        mut update: impl FnMut(&mut Vertex<N>) -> R,
+    ) -> R {
+        debug_assert!(
+            vertex_id < self.vertex_capacity,
+            "vertex identifier {vertex_id} exceeds capacity {}",
+            self.vertex_capacity
+        );
+        if let Some(vertex) = self.vertices.get_mut(vertex_id) {
+            return update(vertex);
+        }
+        let mut vertex = Vertex::new();
+        let result = update(&mut vertex);
+        self.vertices.insert(vertex_id, vertex);
+        result
     }
 
     /// Intern the provided [`Label`] within the graph's [`LabelInterner`].
@@ -238,7 +288,7 @@ impl<const N: usize> Sodg<N> {
         collected
     }
 
-    fn edges_pointing_to(&self, targets: &[usize]) -> Vec<(usize, Vec<(LabelId, usize)>)> {
+    fn edges_pointing_to(&self, targets: &FxHashSet<usize>) -> Vec<(usize, Vec<(LabelId, usize)>)> {
         if targets.is_empty() {
             return Vec::new();
         }
@@ -246,6 +296,8 @@ impl<const N: usize> Sodg<N> {
         for (source, vertex) in self.vertices.iter() {
             let mut edges = Vec::new();
             for edge in &vertex.edges {
+                #[cfg(test)]
+                record_membership_check();
                 if targets.contains(&edge.to) {
                     edges.push((edge.label_id, edge.to));
                 }
@@ -304,7 +356,10 @@ impl<const N: usize> Sodg<N> {
             }
             return members;
         }
-        let removals = self.edges_pointing_to(&members);
+        let mut member_set = FxHashSet::default();
+        member_set.reserve(members.len());
+        member_set.extend(members.iter().copied());
+        let removals = self.edges_pointing_to(&member_set);
         self.remove_edges(&removals);
         self.reset_vertices(&members);
         if let Some(stored) = self.stores.get_mut(branch) {
@@ -335,7 +390,9 @@ impl<const N: usize> Sodg<N> {
     /// If alerts trigger any error, the error will be returned here.
     #[inline]
     pub fn add(&mut self, v1: usize) {
-        self.vertices.get_mut(v1).unwrap().branch = 1;
+        self.ensure_vertex(v1, |vertex| {
+            vertex.branch = BRANCH_STATIC;
+        });
         #[cfg(debug_assertions)]
         trace!("#add: vertex ν{v1} added");
     }
@@ -443,11 +500,10 @@ impl<const N: usize> Sodg<N> {
         if let Some(resolved) = self.labels.resolve(label_id) {
             debug_assert_eq!(resolved, label.to_string());
         }
-        let mut ours = self.vertices.get(v1).unwrap().branch;
-        let theirs = self.vertices.get(v2).unwrap().branch;
+        let mut ours = self.ensure_vertex(v1, |vertex| vertex.branch);
+        let theirs = self.ensure_vertex(v2, |vertex| vertex.branch);
         let destination = Self::encode_vertex_id(v2);
-        {
-            let vertex = self.vertices.get_mut(v1).unwrap();
+        self.ensure_vertex(v1, |vertex| {
             if let Some(slot) = vertex.index.get_mut(label_id).map(|entry| {
                 entry.destination = destination;
                 entry.slot
@@ -467,28 +523,36 @@ impl<const N: usize> Sodg<N> {
                 let slot = vertex.push_edge(label_id, label, v2);
                 vertex.index.insert(label_id, EdgeIndexEntry { destination, slot });
             }
-        }
-        let vtx1 = self.vertices.get_mut(v1).unwrap();
+        });
         if ours == BRANCH_STATIC {
             if theirs == BRANCH_STATIC {
-                for b in self.branches.iter_mut() {
-                    if b.1.is_empty() {
-                        b.1.push(v1);
-                        ours = b.0;
-                        vtx1.branch = ours;
+                for branch in self.branches.iter_mut() {
+                    if branch.1.is_empty() {
+                        branch.1.push(v1);
+                        ours = branch.0;
                         break;
                     }
                 }
-                self.vertices.get_mut(v2).unwrap().branch = ours;
+                self.ensure_vertex(v1, |vertex| {
+                    vertex.branch = ours;
+                });
+                self.ensure_vertex(v2, |vertex| {
+                    vertex.branch = ours;
+                });
                 self.branches.get_mut(ours).unwrap().push(v2);
             } else {
-                vtx1.branch = theirs;
+                self.ensure_vertex(v1, |vertex| {
+                    vertex.branch = theirs;
+                });
                 self.branches.get_mut(theirs).unwrap().push(v1);
             }
         } else {
-            let vtx2 = self.vertices.get_mut(v2).unwrap();
-            if vtx2.branch == BRANCH_STATIC {
-                vtx2.branch = ours;
+            let needs_branch_update =
+                self.ensure_vertex(v2, |vertex| vertex.branch == BRANCH_STATIC);
+            if needs_branch_update {
+                self.ensure_vertex(v2, |vertex| {
+                    vertex.branch = ours;
+                });
                 self.branches.get_mut(ours).unwrap().push(v2);
             }
         }
@@ -522,10 +586,12 @@ impl<const N: usize> Sodg<N> {
     /// If alerts trigger any error, the error will be returned here.
     #[inline]
     pub fn put(&mut self, v: usize, d: &Hex) {
-        let vtx = self.vertices.get_mut(v).unwrap();
-        vtx.persistence = Persistence::Stored;
-        vtx.data = d.clone();
-        *self.stores.get_mut(vtx.branch).unwrap() += 1;
+        let branch = self.ensure_vertex(v, |vertex| {
+            vertex.persistence = Persistence::Stored;
+            vertex.data = d.clone();
+            vertex.branch
+        });
+        *self.stores.get_mut(branch).unwrap() += 1;
         #[cfg(debug_assertions)]
         trace!("#put: data of ν{v} set to {d}");
     }
@@ -563,43 +629,55 @@ impl<const N: usize> Sodg<N> {
             Repeat,
         }
 
+        enum RetrievalInfo {
+            Stored { data: Hex, branch: usize },
+            Taken(Hex),
+            Empty,
+        }
+
         let mut cleanup_branch = None;
         let mut reset_vertex = None;
         let mut retrieved = None;
         let mut result = None;
-        {
-            let vertex = self.vertices.get_mut(v).unwrap();
-            match vertex.persistence {
-                Persistence::Stored => {
-                    debug_assert!(
-                        vertex.branch != BRANCH_NONE,
-                        "Vertex ν{v} is marked for storage but has no branch",
-                    );
-                    let data = vertex.data.clone();
-                    vertex.persistence = Persistence::Taken;
-                    let branch = vertex.branch;
-                    let is_static_branch = branch == BRANCH_STATIC;
-                    if let Some(stored) = self.stores.get_mut(branch) {
-                        debug_assert!(*stored > 0, "Branch {branch} store counter underflow");
-                        *stored -= 1;
-                        if *stored == 0 && !is_static_branch {
-                            cleanup_branch = Some(branch);
-                        }
-                    } else if !is_static_branch {
+        let info = self.ensure_vertex(v, |vertex| match vertex.persistence {
+            Persistence::Stored => {
+                debug_assert!(
+                    vertex.branch != BRANCH_NONE,
+                    "Vertex ν{v} is marked for storage but has no branch",
+                );
+                let data = vertex.data.clone();
+                vertex.persistence = Persistence::Taken;
+                RetrievalInfo::Stored {
+                    data,
+                    branch: vertex.branch,
+                }
+            }
+            Persistence::Taken => RetrievalInfo::Taken(vertex.data.clone()),
+            Persistence::Empty => RetrievalInfo::Empty,
+        });
+        match info {
+            RetrievalInfo::Stored { data, branch } => {
+                let is_static_branch = branch == BRANCH_STATIC;
+                if let Some(stored) = self.stores.get_mut(branch) {
+                    debug_assert!(*stored > 0, "Branch {branch} store counter underflow");
+                    *stored -= 1;
+                    if *stored == 0 && !is_static_branch {
                         cleanup_branch = Some(branch);
                     }
-                    if is_static_branch {
-                        reset_vertex = Some(v);
-                    }
-                    result = Some(data);
-                    retrieved = Some(Retrieval::Fresh);
+                } else if !is_static_branch {
+                    cleanup_branch = Some(branch);
                 }
-                Persistence::Taken => {
-                    result = Some(vertex.data.clone());
-                    retrieved = Some(Retrieval::Repeat);
+                if is_static_branch {
+                    reset_vertex = Some(v);
                 }
-                Persistence::Empty => {}
+                result = Some(data);
+                retrieved = Some(Retrieval::Fresh);
             }
+            RetrievalInfo::Taken(data) => {
+                result = Some(data);
+                retrieved = Some(Retrieval::Repeat);
+            }
+            RetrievalInfo::Empty => {}
         }
         if let Some(vertex_id) = reset_vertex {
             self.reset_vertex_state(vertex_id);
@@ -851,6 +929,31 @@ mod tests {
     }
 
     #[test]
+    fn add_inserts_vertex_on_first_use() {
+        let mut g: Sodg<16> = Sodg::empty(16);
+        assert!(g.vertices.get(5).is_none());
+        g.add(5);
+        assert_eq!(BRANCH_STATIC, g.vertices.get(5).unwrap().branch);
+    }
+
+    #[test]
+    fn bind_initializes_vertices_when_missing() {
+        let mut g: Sodg<16> = Sodg::empty(32);
+        let label = Label::Alpha(0);
+        g.bind(0, 1, label).unwrap();
+        assert_eq!(Some(1), g.kid(0, label));
+    }
+
+    #[test]
+    fn put_stores_payload_after_add() {
+        let mut g: Sodg<16> = Sodg::empty(32);
+        let payload = Hex::from_str_bytes("payload");
+        g.add(3);
+        g.put(3, &payload);
+        assert_eq!(Some(payload.clone()), g.data(3));
+    }
+
+    #[test]
     fn sets_branch_correctly() {
         let mut g: Sodg<16> = Sodg::empty(256);
         g.add(1);
@@ -1046,6 +1149,73 @@ mod tests {
         assert_eq!(BRANCH_STATIC, second_vertex.branch);
         assert!(second_vertex.persistence == Persistence::Stored);
         assert_eq!(second, second_vertex.data.clone());
+    }
+
+    #[test]
+    fn cleanup_branch_uses_constant_time_membership_checks() {
+        const ADDITIONAL_MEMBERS: usize = 128;
+        let mut g: Sodg<64> = Sodg::empty(20_000);
+        g.add(1);
+        g.add(2);
+        g.bind(1, 2, Label::Alpha(0)).unwrap();
+
+        let branch = g.vertices.get(1).unwrap().branch;
+        assert_ne!(BRANCH_STATIC, branch);
+
+        let mut expected_members = g
+            .branches
+            .get(branch)
+            .unwrap()
+            .iter()
+            .copied()
+            .collect::<Vec<_>>();
+        let mut previous = 2;
+        for vertex_id in 3..(3 + ADDITIONAL_MEMBERS) {
+            g.add(vertex_id);
+            g.bind(1, vertex_id, Label::Alpha(vertex_id)).unwrap();
+            g.bind(vertex_id, previous, Label::Alpha(vertex_id + 10_000))
+                .unwrap();
+            previous = vertex_id;
+        }
+
+        expected_members.extend(g.branches.get(branch).unwrap().iter().copied());
+        expected_members.sort_unstable();
+        expected_members.dedup();
+
+        let outside_start = 10_000;
+        for offset in 0..ADDITIONAL_MEMBERS {
+            let src = outside_start + offset * 2;
+            let dst = src + 1;
+            g.add(src);
+            g.add(dst);
+            g.bind(src, dst, Label::Alpha(offset + 20_000)).unwrap();
+        }
+
+        let total_edges_before = g
+            .vertices
+            .iter()
+            .map(|(_, vertex)| vertex.edges.len())
+            .sum::<usize>();
+
+        reset_membership_check_counter();
+        let removed = g.cleanup_branch(branch);
+
+        assert_eq!(expected_members, removed);
+        assert!(
+            g.branches
+                .get(branch)
+                .map_or(true, |members| members.is_empty())
+        );
+        assert_eq!(Some(&0), g.stores.get(branch));
+
+        for vertex in g.vertices.iter().map(|(_, vertex)| vertex) {
+            for edge in &vertex.edges {
+                assert!(removed.binary_search(&edge.to).is_err());
+            }
+        }
+
+        let membership_checks = membership_check_count();
+        assert_eq!(total_edges_before, membership_checks);
     }
 
     #[test]
