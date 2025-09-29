@@ -1,22 +1,23 @@
 // SPDX-FileCopyrightText: Copyright (c) 2022-2025 Objectionary.com
 // SPDX-License-Identifier: MIT
 
-use anyhow::Context as _;
-#[cfg(debug_assertions)]
-use log::trace;
-
 use std::borrow::Cow;
 use std::convert::TryFrom as _;
 use std::fmt::{Display, Formatter, Result as FmtResult};
 use std::str::FromStr as _;
 
+#[cfg(test)]
+use std::cell::Cell;
+
+use anyhow::Context as _;
+#[cfg(debug_assertions)]
+use log::trace;
+use rustc_hash::FxHashSet;
+
 use crate::{
     BRANCH_NONE, BRANCH_STATIC, Edge, EdgeIndex, EdgeIndexEntry, LabelId, Persistence, Sodg, Vertex,
 };
 use crate::{Hex, Label, LabelInterner, LabelInternerError};
-
-#[cfg(test)]
-use std::cell::Cell;
 
 #[cfg(test)]
 thread_local! {
@@ -31,6 +32,26 @@ fn reset_edge_comparison_counter() {
 #[cfg(test)]
 fn edge_comparison_count() -> usize {
     EDGE_COMPARISON_COUNTER.with(|counter| counter.get())
+}
+
+#[cfg(test)]
+thread_local! {
+    static MEMBERSHIP_CHECK_COUNTER: Cell<usize> = Cell::new(0);
+}
+
+#[cfg(test)]
+fn reset_membership_check_counter() {
+    MEMBERSHIP_CHECK_COUNTER.with(|counter| counter.set(0));
+}
+
+#[cfg(test)]
+fn membership_check_count() -> usize {
+    MEMBERSHIP_CHECK_COUNTER.with(|counter| counter.get())
+}
+
+#[cfg(test)]
+fn record_membership_check() {
+    MEMBERSHIP_CHECK_COUNTER.with(|counter| counter.set(counter.get() + 1));
 }
 
 /// Errors that may occur when binding vertices with pre-interned labels.
@@ -274,7 +295,7 @@ impl<const N: usize> Sodg<N> {
         collected
     }
 
-    fn edges_pointing_to(&self, targets: &[usize]) -> Vec<(usize, Vec<(LabelId, usize)>)> {
+    fn edges_pointing_to(&self, targets: &FxHashSet<usize>) -> Vec<(usize, Vec<(LabelId, usize)>)> {
         if targets.is_empty() {
             return Vec::new();
         }
@@ -282,6 +303,8 @@ impl<const N: usize> Sodg<N> {
         for (source, vertex) in self.vertices.iter() {
             let mut edges = Vec::new();
             for edge in &vertex.edges {
+                #[cfg(test)]
+                record_membership_check();
                 if targets.contains(&edge.to) {
                     edges.push((edge.label_id, edge.to));
                 }
@@ -340,7 +363,10 @@ impl<const N: usize> Sodg<N> {
             }
             return members;
         }
-        let removals = self.edges_pointing_to(&members);
+        let mut member_set = FxHashSet::default();
+        member_set.reserve(members.len());
+        member_set.extend(members.iter().copied());
+        let removals = self.edges_pointing_to(&member_set);
         self.remove_edges(&removals);
         self.reset_vertices(&members);
         if let Some(stored) = self.stores.get_mut(branch) {
@@ -1157,6 +1183,73 @@ mod tests {
         assert_eq!(BRANCH_STATIC, second_vertex.branch);
         assert!(second_vertex.persistence == Persistence::Stored);
         assert_eq!(second, second_vertex.data.clone());
+    }
+
+    #[test]
+    fn cleanup_branch_uses_constant_time_membership_checks() {
+        const ADDITIONAL_MEMBERS: usize = 128;
+        let mut g: Sodg<64> = Sodg::empty(20_000);
+        g.add(1);
+        g.add(2);
+        g.bind(1, 2, Label::Alpha(0)).unwrap();
+
+        let branch = g.vertices.get(1).unwrap().branch;
+        assert_ne!(BRANCH_STATIC, branch);
+
+        let mut expected_members = g
+            .branches
+            .get(branch)
+            .unwrap()
+            .iter()
+            .copied()
+            .collect::<Vec<_>>();
+        let mut previous = 2;
+        for vertex_id in 3..(3 + ADDITIONAL_MEMBERS) {
+            g.add(vertex_id);
+            g.bind(1, vertex_id, Label::Alpha(vertex_id)).unwrap();
+            g.bind(vertex_id, previous, Label::Alpha(vertex_id + 10_000))
+                .unwrap();
+            previous = vertex_id;
+        }
+
+        expected_members.extend(g.branches.get(branch).unwrap().iter().copied());
+        expected_members.sort_unstable();
+        expected_members.dedup();
+
+        let outside_start = 10_000;
+        for offset in 0..ADDITIONAL_MEMBERS {
+            let src = outside_start + offset * 2;
+            let dst = src + 1;
+            g.add(src);
+            g.add(dst);
+            g.bind(src, dst, Label::Alpha(offset + 20_000)).unwrap();
+        }
+
+        let total_edges_before = g
+            .vertices
+            .iter()
+            .map(|(_, vertex)| vertex.edges.len())
+            .sum::<usize>();
+
+        reset_membership_check_counter();
+        let removed = g.cleanup_branch(branch);
+
+        assert_eq!(expected_members, removed);
+        assert!(
+            g.branches
+                .get(branch)
+                .map_or(true, |members| members.is_empty())
+        );
+        assert_eq!(Some(&0), g.stores.get(branch));
+
+        for vertex in g.vertices.iter().map(|(_, vertex)| vertex) {
+            for edge in &vertex.edges {
+                assert!(removed.binary_search(&edge.to).is_err());
+            }
+        }
+
+        let membership_checks = membership_check_count();
+        assert_eq!(total_edges_before, membership_checks);
     }
 
     #[test]
