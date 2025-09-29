@@ -42,15 +42,15 @@ pub fn on_graph(total: usize) -> (i64, Duration) {
         g.add(v1);
         let v2 = v1 + 1;
         g.add(v2);
-        g.bind(v1, v2, Label::Alpha(0));
-        g.bind(v2, v1, Label::Greek('ρ'));
+        g.bind(v1, v2, Label::Alpha(0)).unwrap();
+        g.bind(v2, v1, Label::Greek('ρ')).unwrap();
         let v3 = v2 + 1;
         g.add(v3);
-        g.bind(v2, v3, Label::Greek('Δ'));
+        g.bind(v2, v3, Label::Greek('Δ')).unwrap();
         g.put(v3, &forty_two);
         let v4 = v3 + 1;
         g.add(v4);
-        g.bind(v4, v1, Label::Greek('φ'));
+        g.bind(v4, v1, Label::Greek('φ')).unwrap();
         assert!(g.kid(v4, Label::Alpha(0)).is_none());
         g.kid(v4, Label::Greek('φ')).unwrap();
         g.kid(v1, Label::Alpha(0)).unwrap();
@@ -72,11 +72,7 @@ pub fn on_heap(total: usize) -> (i64, Duration) {
     (std::hint::black_box(sum), start.elapsed())
 }
 
-#[allow(
-    clippy::cast_possible_truncation,
-    clippy::cast_precision_loss,
-    clippy::cast_sign_loss
-)]
+#[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss, clippy::cast_sign_loss)]
 fn u128_to_f64(x: u128) -> Option<f64> {
     let res = x as f64;
     (res as u128 == x).then_some(res)
