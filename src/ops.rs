@@ -267,15 +267,32 @@ impl<const N: usize> Sodg<N> {
         }
     }
 
+    fn reset_vertex_state(&mut self, vertex_id: usize) {
+        let Some(vertex) = self.vertices.get_mut(vertex_id) else {
+            return;
+        };
+        let branch = vertex.branch;
+        if vertex.persistence == Persistence::Stored
+            && let Some(stored) = self.stores.get_mut(branch)
+            && *stored > 0
+        {
+            *stored -= 1;
+        }
+        if let Some(members) = self.branches.get_mut(branch)
+            && let Some(position) = members.iter().position(|member| *member == vertex_id)
+        {
+            members.swap_remove(position);
+        }
+        vertex.edges.clear();
+        vertex.index = EdgeIndex::new();
+        vertex.branch = BRANCH_NONE;
+        vertex.persistence = Persistence::Empty;
+        vertex.data = Hex::empty();
+    }
+
     fn reset_vertices(&mut self, vertices: &[usize]) {
         for vertex_id in vertices {
-            if let Some(vertex) = self.vertices.get_mut(*vertex_id) {
-                vertex.edges.clear();
-                vertex.index = EdgeIndex::new();
-                vertex.branch = BRANCH_NONE;
-                vertex.persistence = Persistence::Empty;
-                vertex.data = Hex::empty();
-            }
+            self.reset_vertex_state(*vertex_id);
         }
     }
 
@@ -547,6 +564,7 @@ impl<const N: usize> Sodg<N> {
         }
 
         let mut cleanup_branch = None;
+        let mut reset_vertex = None;
         let mut retrieved = None;
         let mut result = None;
         {
@@ -560,14 +578,18 @@ impl<const N: usize> Sodg<N> {
                     let data = vertex.data.clone();
                     vertex.persistence = Persistence::Taken;
                     let branch = vertex.branch;
+                    let is_static_branch = branch == BRANCH_STATIC;
                     if let Some(stored) = self.stores.get_mut(branch) {
                         debug_assert!(*stored > 0, "Branch {branch} store counter underflow");
                         *stored -= 1;
-                        if *stored == 0 {
+                        if *stored == 0 && !is_static_branch {
                             cleanup_branch = Some(branch);
                         }
-                    } else {
+                    } else if !is_static_branch {
                         cleanup_branch = Some(branch);
+                    }
+                    if is_static_branch {
+                        reset_vertex = Some(v);
                     }
                     result = Some(data);
                     retrieved = Some(Retrieval::Fresh);
@@ -578,6 +600,9 @@ impl<const N: usize> Sodg<N> {
                 }
                 Persistence::Empty => {}
             }
+        }
+        if let Some(vertex_id) = reset_vertex {
+            self.reset_vertex_state(vertex_id);
         }
         if let Some(branch) = cleanup_branch {
             let removed = self.cleanup_branch(branch);
@@ -991,6 +1016,36 @@ mod tests {
         assert!(g.vertices.get(0).unwrap().persistence == Persistence::Empty);
         assert!(g.vertices.get(1).unwrap().persistence == Persistence::Empty);
         assert!(g.vertices.get(2).unwrap().persistence == Persistence::Empty);
+    }
+
+    #[test]
+    fn reading_static_vertex_data_isolated() {
+        let mut g: Sodg<16> = Sodg::empty(256);
+        g.add(1);
+        g.add(2);
+        let first = Hex::from_str_bytes("first");
+        let second = Hex::from_str_bytes("second");
+        g.put(1, &first);
+        g.put(2, &second);
+
+        assert_eq!(BRANCH_STATIC, g.vertices.get(1).unwrap().branch);
+        assert_eq!(BRANCH_STATIC, g.vertices.get(2).unwrap().branch);
+        let stored_before = *g.stores.get(BRANCH_STATIC).unwrap();
+
+        assert_eq!(first, g.data(1).unwrap());
+
+        let stored_after = *g.stores.get(BRANCH_STATIC).unwrap();
+        assert_eq!(stored_before - 1, stored_after);
+
+        let first_vertex = g.vertices.get(1).unwrap();
+        assert_eq!(BRANCH_NONE, first_vertex.branch);
+        assert!(first_vertex.persistence == Persistence::Empty);
+        assert!(first_vertex.edges.is_empty());
+
+        let second_vertex = g.vertices.get(2).unwrap();
+        assert_eq!(BRANCH_STATIC, second_vertex.branch);
+        assert!(second_vertex.persistence == Persistence::Stored);
+        assert_eq!(second, second_vertex.data.clone());
     }
 
     #[test]
