@@ -155,10 +155,7 @@ impl Index<RangeToInclusive<usize>> for Hex {
                 if index.end < *len {
                     &a[index]
                 } else {
-                    panic!(
-                        "RangeToInclusive {:?} out of bounds (len = {})",
-                        index, *len
-                    )
+                    panic!("RangeToInclusive {:?} out of bounds (len = {})", index, *len)
                 }
             }
         }
@@ -411,11 +408,7 @@ impl Hex {
         if self.bytes().is_empty() {
             "--".to_string()
         } else {
-            self.bytes()
-                .iter()
-                .map(|b| format!("{b:02X}"))
-                .collect::<Vec<String>>()
-                .join("-")
+            self.bytes().iter().map(|b| format!("{b:02X}")).collect::<Vec<String>>().join("-")
         }
     }
 

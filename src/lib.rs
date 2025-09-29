@@ -192,9 +192,5 @@ fn init() {
     use log::LevelFilter;
     use simple_logger::SimpleLogger;
 
-    SimpleLogger::new()
-        .without_timestamps()
-        .with_level(LevelFilter::Trace)
-        .init()
-        .unwrap();
+    SimpleLogger::new().without_timestamps().with_level(LevelFilter::Trace).init().unwrap();
 }

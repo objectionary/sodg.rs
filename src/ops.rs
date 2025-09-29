@@ -11,7 +11,8 @@ use std::fmt::{Display, Formatter, Result as FmtResult};
 use std::str::FromStr as _;
 
 use crate::{
-    BRANCH_NONE, BRANCH_STATIC, Edge, EdgeIndex, EdgeIndexEntry, LabelId, Persistence, Sodg, Vertex,
+    BRANCH_NONE, BRANCH_STATIC, Edge, EdgeIndex, EdgeIndexEntry, LabelId, Persistence, Sodg,
+    Vertex,
 };
 use crate::{Hex, Label, LabelInterner, LabelInternerError};
 
@@ -60,10 +61,9 @@ impl Display for BindError {
             Self::InvalidLabelCharacter(ch) => {
                 write!(f, "label contains unsupported character '{ch}'")
             }
-            Self::LabelMismatch { expected, provided } => write!(
-                f,
-                "label {provided} does not match canonical representation {expected}"
-            ),
+            Self::LabelMismatch { expected, provided } => {
+                write!(f, "label {provided} does not match canonical representation {expected}")
+            }
         }
     }
 }
@@ -103,11 +103,7 @@ impl<const N: usize> Vertex<N> {
 
     fn push_edge(&mut self, label_id: LabelId, label: Label, destination: usize) -> usize {
         let slot = self.edges.len();
-        self.edges.push(Edge {
-            label_id,
-            label,
-            to: destination,
-        });
+        self.edges.push(Edge { label_id, label, to: destination });
         slot
     }
 
@@ -115,10 +111,7 @@ impl<const N: usize> Vertex<N> {
         let pairs = self.edges.iter().enumerate().map(|(slot, edge)| {
             (
                 edge.label_id,
-                crate::EdgeIndexEntry {
-                    destination: Sodg::<N>::encode_vertex_id(edge.to),
-                    slot,
-                },
+                crate::EdgeIndexEntry { destination: Sodg::<N>::encode_vertex_id(edge.to), slot },
             )
         });
         self.index.rebuild(pairs);
@@ -422,10 +415,7 @@ impl<const N: usize> Sodg<N> {
             }
         };
         if normalized != canonical {
-            return Err(BindError::LabelMismatch {
-                expected: canonical,
-                provided: label,
-            });
+            return Err(BindError::LabelMismatch { expected: canonical, provided: label });
         }
         self.bind_canonical(v1, v2, label_id, normalized);
         Ok(())
@@ -453,16 +443,12 @@ impl<const N: usize> Sodg<N> {
                         entry.destination = destination;
                         entry.slot = slot;
                     } else {
-                        vertex
-                            .index
-                            .insert(label_id, EdgeIndexEntry { destination, slot });
+                        vertex.index.insert(label_id, EdgeIndexEntry { destination, slot });
                     }
                 }
             } else {
                 let slot = vertex.push_edge(label_id, label, v2);
-                vertex
-                    .index
-                    .insert(label_id, EdgeIndexEntry { destination, slot });
+                vertex.index.insert(label_id, EdgeIndexEntry { destination, slot });
             }
         }
         let vtx1 = self.vertices.get_mut(v1).unwrap();
@@ -664,15 +650,9 @@ impl<const N: usize> Sodg<N> {
     /// If vertex `v1` is absent, `Err` will be returned.
     #[inline]
     pub fn kids(&self, v: usize) -> impl Iterator<Item = KidRef<'_>> + '_ {
-        let vertex = self
-            .vertices
-            .get(v)
-            .with_context(|| format!("Can't find ν{v} in kids()"))
-            .unwrap();
-        Kids {
-            interner: &self.labels,
-            inner: vertex.edges.iter(),
-        }
+        let vertex =
+            self.vertices.get(v).with_context(|| format!("Can't find ν{v} in kids()")).unwrap();
+        Kids { interner: &self.labels, inner: vertex.edges.iter() }
     }
 
     /// Find a kid of a vertex, by its edge name, and return the ID of the vertex found.
@@ -813,11 +793,7 @@ impl<'a> Iterator for Kids<'a> {
         if let Some(resolved) = self.interner.resolve(edge.label_id) {
             debug_assert_eq!(resolved, edge.label.to_string());
         }
-        Some(KidRef {
-            label_id: edge.label_id,
-            label: &edge.label,
-            destination: &edge.to,
-        })
+        Some(KidRef { label_id: edge.label_id, label: &edge.label, destination: &edge.to })
     }
 }
 
@@ -929,13 +905,8 @@ mod tests {
         assert_eq!(BRANCH_STATIC, g.vertices.get(3).unwrap().branch);
         let _ = g.bind(3, 1, Label::Alpha(1));
         assert_eq!(dynamic_branch, g.vertices.get(3).unwrap().branch);
-        let members: Vec<usize> = g
-            .branches
-            .get(dynamic_branch)
-            .unwrap()
-            .iter()
-            .copied()
-            .collect();
+        let members: Vec<usize> =
+            g.branches.get(dynamic_branch).unwrap().iter().copied().collect();
         assert_eq!(3, members.len());
         assert!(members.contains(&1));
         assert!(members.contains(&2));
@@ -953,13 +924,8 @@ mod tests {
         assert_eq!(BRANCH_STATIC, g.vertices.get(3).unwrap().branch);
         let _ = g.bind(1, 3, Label::Alpha(1));
         assert_eq!(dynamic_branch, g.vertices.get(3).unwrap().branch);
-        let members: Vec<usize> = g
-            .branches
-            .get(dynamic_branch)
-            .unwrap()
-            .iter()
-            .copied()
-            .collect();
+        let members: Vec<usize> =
+            g.branches.get(dynamic_branch).unwrap().iter().copied().collect();
         assert!(members.contains(&1));
         assert!(members.contains(&2));
         assert!(members.contains(&3));
@@ -1218,16 +1184,11 @@ mod tests {
         let padded = Label::Str(['f', 'o', 'o', ' ', ' ', ' ', ' ', ' ']);
         let canonical = Label::from_str("foo").unwrap();
         let label_id = g.intern_label(&padded).unwrap();
-        g.bind_with_label_id(0, 1, label_id, padded)
-            .expect("initial bind must succeed");
-        g.bind_with_label_id(0, 2, label_id, canonical)
-            .expect("rebinding must succeed");
+        g.bind_with_label_id(0, 1, label_id, padded).expect("initial bind must succeed");
+        g.bind_with_label_id(0, 2, label_id, canonical).expect("rebinding must succeed");
         let vertex = g.vertices.get(0).unwrap();
-        let edge = vertex
-            .edges
-            .iter()
-            .find(|edge| edge.label_id == label_id)
-            .expect("edge must exist");
+        let edge =
+            vertex.edges.iter().find(|edge| edge.label_id == label_id).expect("edge must exist");
         assert_eq!(canonical, edge.label);
         assert_eq!(2, edge.to);
     }
@@ -1256,10 +1217,7 @@ mod tests {
             g.add(destination);
             g.bind(0, destination, Label::Alpha(label_idx)).unwrap();
         }
-        assert!(matches!(
-            g.vertices.get(0).unwrap().index,
-            EdgeIndex::Small(_)
-        ));
+        assert!(matches!(g.vertices.get(0).unwrap().index, EdgeIndex::Small(_)));
         super::reset_edge_comparison_counter();
         assert_eq!(0, super::edge_comparison_count());
         for label_idx in 0..SMALL_THRESHOLD {
@@ -1271,10 +1229,7 @@ mod tests {
             assert_eq!(1, after - before);
             assert_eq!(Some(new_destination), g.kid(0, Label::Alpha(label_idx)));
         }
-        assert!(matches!(
-            g.vertices.get(0).unwrap().index,
-            EdgeIndex::Small(_)
-        ));
+        assert!(matches!(g.vertices.get(0).unwrap().index, EdgeIndex::Small(_)));
     }
 
     #[test]
@@ -1287,10 +1242,7 @@ mod tests {
             g.add(destination);
             g.bind(0, destination, Label::Alpha(label_idx)).unwrap();
         }
-        assert!(matches!(
-            g.vertices.get(0).unwrap().index,
-            EdgeIndex::Large(_)
-        ));
+        assert!(matches!(g.vertices.get(0).unwrap().index, EdgeIndex::Large(_)));
         super::reset_edge_comparison_counter();
         for label_idx in 0..degree {
             let before = super::edge_comparison_count();
@@ -1301,10 +1253,7 @@ mod tests {
             assert_eq!(1, after - before);
             assert_eq!(Some(new_destination), g.kid(0, Label::Alpha(label_idx)));
         }
-        assert!(matches!(
-            g.vertices.get(0).unwrap().index,
-            EdgeIndex::Large(_)
-        ));
+        assert!(matches!(g.vertices.get(0).unwrap().index, EdgeIndex::Large(_)));
     }
 
     #[test]
@@ -1322,10 +1271,8 @@ mod tests {
             assert_eq!(vertex.edges.len(), vertex.index.len());
             assert!(matches!(vertex.index, EdgeIndex::Small(_)));
             for (slot, edge) in vertex.edges.iter().enumerate() {
-                let entry = vertex
-                    .index
-                    .get(edge.label_id)
-                    .expect("index entry must exist after removal");
+                let entry =
+                    vertex.index.get(edge.label_id).expect("index entry must exist after removal");
                 assert_eq!(slot, entry.slot);
                 assert_eq!(
                     Sodg::<64>::encode_vertex_id(edge.to),
@@ -1352,10 +1299,8 @@ mod tests {
             assert_eq!(previous - 1, vertex.edges.len());
             assert_eq!(vertex.edges.len(), vertex.index.len());
             for (slot, edge) in vertex.edges.iter().enumerate() {
-                let entry = vertex
-                    .index
-                    .get(edge.label_id)
-                    .expect("index entry must exist after removal");
+                let entry =
+                    vertex.index.get(edge.label_id).expect("index entry must exist after removal");
                 assert_eq!(slot, entry.slot);
                 assert_eq!(
                     Sodg::<64>::encode_vertex_id(edge.to),
@@ -1364,10 +1309,7 @@ mod tests {
                 );
             }
         }
-        assert!(matches!(
-            g.vertices.get(0).unwrap().index,
-            EdgeIndex::Large(_)
-        ));
+        assert!(matches!(g.vertices.get(0).unwrap().index, EdgeIndex::Large(_)));
         assert!(g.kid(0, label).is_none());
     }
 
@@ -1379,12 +1321,8 @@ mod tests {
             g.add(vertex);
         }
         for (idx, text) in labels.iter().enumerate() {
-            g.bind(
-                idx,
-                idx + 1,
-                Label::from_str(text).expect("valid label for traversal test"),
-            )
-            .unwrap();
+            g.bind(idx, idx + 1, Label::from_str(text).expect("valid label for traversal test"))
+                .unwrap();
         }
         assert_eq!(Some(labels.len()), g.find(0, "s0.s1.s2.s3.s4"));
         assert!(g.find(0, "s0.s1.s2.s3.missing").is_none());

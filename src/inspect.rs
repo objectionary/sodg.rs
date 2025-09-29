@@ -18,20 +18,13 @@ impl<const N: usize> Sodg<N> {
     /// If it's impossible to inspect, an error will be returned.
     pub fn inspect(&self, v: usize) -> Result<String> {
         let mut seen = HashSet::new();
-        Ok(format!(
-            "ν{}\n{}",
-            v,
-            self.inspect_v(v, &mut seen)?.join("\n"),
-        ))
+        Ok(format!("ν{}\n{}", v, self.inspect_v(v, &mut seen)?.join("\n"),))
     }
 
     fn inspect_v(&self, v: usize, seen: &mut HashSet<usize>) -> Result<Vec<String>> {
         seen.insert(v);
         let mut lines = vec![];
-        let vertex = self
-            .vertices
-            .get(v)
-            .with_context(|| format!("Can't find ν{v}"))?;
+        let vertex = self.vertices.get(v).with_context(|| format!("Can't find ν{v}"))?;
         let mut edges = vertex
             .edges
             .iter()

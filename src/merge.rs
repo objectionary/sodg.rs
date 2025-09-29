@@ -3,7 +3,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use log::debug;
 
 use crate::{Label, LabelId, Persistence, Sodg};
@@ -42,11 +42,7 @@ impl<const N: usize> Sodg<N> {
                 must.len(),
                 seen.len(),
                 ordered.len(),
-                ordered
-                    .iter()
-                    .map(|v| format!("ν{v}"))
-                    .collect::<Vec<String>>()
-                    .join(", "),
+                ordered.iter().map(|v| format!("ν{v}")).collect::<Vec<String>>().join(", "),
             );
         }
         debug!(
@@ -84,10 +80,7 @@ impl<const N: usize> Sodg<N> {
         mapped.insert(right, left);
 
         // Access vertex safely
-        let v = g
-            .vertices
-            .get(right)
-            .with_context(|| format!("Can't find ν{right}"))?;
+        let v = g.vertices.get(right).with_context(|| format!("Can't find ν{right}"))?;
 
         // Merge payload if present
         if v.persistence != Persistence::Empty {
@@ -157,9 +150,7 @@ impl<const N: usize> Sodg<N> {
             assert!(
                 self.kid(left, label).is_none(),
                 "Can't merge ν{right} into ν{left}, due to conflict in '{}'",
-                self.labels
-                    .resolve(label_id)
-                    .map_or_else(|| label.to_string(), str::to_owned),
+                self.labels.resolve(label_id).map_or_else(|| label.to_string(), str::to_owned),
             );
             let canonical = self.canonical_label(label_id)?;
             self.bind_with_label_id(left, destination, label_id, canonical)?;

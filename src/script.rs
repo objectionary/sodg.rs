@@ -40,10 +40,7 @@ impl Script {
     #[allow(clippy::should_implement_trait)]
     #[must_use]
     pub fn from_str(s: &str) -> Self {
-        Self {
-            txt: s.to_string(),
-            vars: HashMap::new(),
-        }
+        Self { txt: s.to_string(), vars: HashMap::new() }
     }
 
     /// Deploy the entire script to the [`Sodg`].
@@ -83,9 +80,7 @@ impl Script {
     /// If impossible to deploy, an error will be returned.
     fn deploy_one<const N: usize>(&mut self, cmd: &str, g: &mut Sodg<N>) -> Result<()> {
         static LINE: Lazy<Regex> = Lazy::new(|| Regex::new("^([A-Z]+) *\\(([^)]*)\\)$").unwrap());
-        let cap = LINE
-            .captures(cmd)
-            .with_context(|| format!("Can't parse '{cmd}'"))?;
+        let cap = LINE.captures(cmd).with_context(|| format!("Can't parse '{cmd}'"))?;
         let args: Vec<String> = cap[2]
             .split(',')
             .map(str::trim)
@@ -146,14 +141,10 @@ impl Script {
     fn parse<const N: usize>(&mut self, s: &str, g: &mut Sodg<N>) -> Result<usize> {
         let head = s.chars().next().context("Empty identifier")?;
         if head == '$' || head == 'ν' {
-            let tail = s
-                .get(head.len_utf8()..)
-                .context("Identifier is missing a numeric suffix")?;
+            let tail =
+                s.get(head.len_utf8()..).context("Identifier is missing a numeric suffix")?;
             if head == '$' {
-                Ok(*self
-                    .vars
-                    .entry(tail.to_owned())
-                    .or_insert_with(|| g.next_id()))
+                Ok(*self.vars.entry(tail.to_owned()).or_insert_with(|| g.next_id()))
             } else {
                 Ok(usize::from_str(tail).with_context(|| format!("Parsing of '{s}' failed"))?)
             }

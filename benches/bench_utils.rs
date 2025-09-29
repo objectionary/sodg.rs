@@ -22,13 +22,7 @@ pub(crate) fn label_ids_for_degree(degree: usize) -> Vec<LabelId> {
 pub(crate) fn populate_edge_index(index: &mut EdgeIndex, labels: &[LabelId]) {
     for (offset, label) in labels.iter().enumerate() {
         let destination = (offset + 1) as u32;
-        index.insert(
-            *label,
-            EdgeIndexEntry {
-                destination,
-                slot: offset,
-            },
-        );
+        index.insert(*label, EdgeIndexEntry { destination, slot: offset });
     }
 }
 
@@ -52,10 +46,7 @@ pub(crate) fn run_edge_index_inserts(degree: usize) -> EdgeIndex {
 pub(crate) fn run_edge_index_removals(degree: usize) -> usize {
     let labels = label_ids_for_degree(degree);
     let mut index = build_edge_index(&labels);
-    labels
-        .iter()
-        .filter(|&&label| index.remove(label).is_some())
-        .count()
+    labels.iter().filter(|&&label| index.remove(label).is_some()).count()
 }
 
 /// Perform lookups for the provided `degree` and return the number of successful hits.
@@ -63,10 +54,7 @@ pub(crate) fn run_edge_index_removals(degree: usize) -> usize {
 pub(crate) fn run_edge_index_lookups(degree: usize) -> usize {
     let labels = label_ids_for_degree(degree);
     let index = build_edge_index(&labels);
-    labels
-        .iter()
-        .filter(|&&label| index.get(label).is_some())
-        .count()
+    labels.iter().filter(|&&label| index.get(label).is_some()).count()
 }
 
 /// Build a graph where every vertex on the hot path has `degree` outbound edges.
@@ -95,9 +83,7 @@ pub(crate) fn dense_graph_with_locator<const N: usize>(
         let _ = write!(locator, "{}", main_label);
         for filler in 1..degree {
             let filler_label = Label::Alpha(segment + filler * depth);
-            graph
-                .bind(current, next_vertex + filler, filler_label)
-                .unwrap();
+            graph.bind(current, next_vertex + filler, filler_label).unwrap();
         }
         current = next_vertex;
         next_vertex += degree.max(1);

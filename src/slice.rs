@@ -19,11 +19,7 @@ impl<const N: usize> Sodg<N> {
     #[allow(clippy::use_self)]
     pub fn slice(&self, v: usize) -> Result<Self> {
         let g: Sodg<N> = self.slice_some(v, |_, _, _| true)?;
-        trace!(
-            "#slice: taken {} vertices out of {} at ν{v}",
-            g.len(),
-            self.len(),
-        );
+        trace!("#slice: taken {} vertices out of {} at ν{v}", g.len(), self.len(),);
         Ok(g)
     }
 
@@ -79,11 +75,7 @@ impl<const N: usize> Sodg<N> {
                 }
             }
         }
-        trace!(
-            "#slice_some: taken {} vertices out of {} at ν{v}",
-            ng.len(),
-            self.len(),
-        );
+        trace!("#slice_some: taken {} vertices out of {} at ν{v}", ng.len(), self.len(),);
         Ok(ng)
     }
 }

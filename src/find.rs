@@ -4,7 +4,7 @@
 use std::collections::VecDeque;
 use std::str::FromStr;
 
-use anyhow::{bail, Context as _, Result};
+use anyhow::{Context as _, Result, bail};
 
 use crate::{Label, Sodg};
 
@@ -116,10 +116,7 @@ impl<const N: usize> Sodg<N> {
     }
 
     fn ensure_vertex_alive(&self, id: usize) -> Result<()> {
-        let vertex = self
-            .vertices
-            .get(id)
-            .with_context(|| format!("Can't find ν{id}"))?;
+        let vertex = self.vertices.get(id).with_context(|| format!("Can't find ν{id}"))?;
         if vertex.branch == 0 {
             bail!("Can't find ν{id}");
         }
@@ -140,11 +137,7 @@ mod tests {
         g.bind(1, 2, Label::from_str("first")?)?;
         g.bind(2, 3, Label::from_str("alt")?)?;
         let found = g.find_with_closure(1, "first.second", |v, a| {
-            if v == 2 && a == "second" {
-                Ok("alt".to_string())
-            } else {
-                Ok(String::new())
-            }
+            if v == 2 && a == "second" { Ok("alt".to_string()) } else { Ok(String::new()) }
         })?;
         assert_eq!(3, found);
         Ok(())
@@ -168,11 +161,7 @@ mod tests {
         g.add(3);
         g.bind(2, 3, Label::from_str("x")?)?;
         let found = g.find_with_closure(1, "a.x", |v, a| {
-            if v == 1 && a == "a" {
-                Ok("xyz".to_string())
-            } else {
-                Ok(String::new())
-            }
+            if v == 1 && a == "a" { Ok("xyz".to_string()) } else { Ok(String::new()) }
         })?;
         assert_eq!(3, found);
         Ok(())
@@ -196,9 +185,7 @@ mod tests {
         let result = g.find_with_closure(0, "bar", |_v, _a| anyhow::bail!("no alternative"));
         assert!(result.is_err());
         let err = result.err().unwrap();
-        let has_cause = err
-            .chain()
-            .any(|cause| cause.to_string().contains("no alternative"));
+        let has_cause = err.chain().any(|cause| cause.to_string().contains("no alternative"));
         assert!(has_cause, "{}", err);
         Ok(())
     }
@@ -210,11 +197,9 @@ mod tests {
         let result = g.find_with_closure(0, "foo", |_v, _a| Ok("foo".to_string()));
         assert!(result.is_err());
         let err = result.err().unwrap();
-        let has_depth_note = err
-            .chain()
-            .any(|cause| cause.to_string().contains("Recursion depth"));
+        let has_depth_note =
+            err.chain().any(|cause| cause.to_string().contains("Recursion depth"));
         assert!(has_depth_note, "{}", err);
         Ok(())
     }
 }
-

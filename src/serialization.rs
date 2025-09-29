@@ -12,11 +12,8 @@ use crate::Sodg;
 
 impl<const N: usize> Sodg<N> {
     fn rebuild_edge_indexes(&mut self) {
-        let vertex_ids: Vec<usize> = self
-            .vertices
-            .iter()
-            .map(|(vertex_id, _)| vertex_id)
-            .collect();
+        let vertex_ids: Vec<usize> =
+            self.vertices.iter().map(|(vertex_id, _)| vertex_id).collect();
         for vertex_id in vertex_ids {
             if let Some(vertex) = self.vertices.get_mut(vertex_id) {
                 vertex.rebuild_index();
@@ -137,10 +134,7 @@ mod tests {
             let encoded = u32::try_from(edge.to).expect("vertex identifier fits into u32");
             assert_eq!(
                 Some(encoded),
-                vertex
-                    .index
-                    .get(edge.label_id)
-                    .map(|entry| entry.destination),
+                vertex.index.get(edge.label_id).map(|entry| entry.destination),
             );
             let label_text = after.edge_label_text(edge);
             let parsed = Label::from_str(label_text.as_ref()).expect("edge label parsed");

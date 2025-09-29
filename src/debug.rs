@@ -39,11 +39,7 @@ impl<const N: usize> Debug for Sodg<N> {
             }
             lines.push(format!(
                 "b{b}: {{{}}}",
-                members
-                    .into_iter()
-                    .map(|v| format!("ν{v}"))
-                    .collect::<Vec<String>>()
-                    .join(", ")
+                members.into_iter().map(|v| format!("ν{v}")).collect::<Vec<String>>().join(", ")
             ));
         }
         f.write_str(lines.join("\n").as_str())
@@ -58,22 +54,12 @@ impl<const N: usize> Sodg<N> {
     ///
     /// If the vertex is absent, an error may be returned.
     pub fn v_print(&self, v: usize) -> Result<String> {
-        let vtx = &self
-            .vertices
-            .get(v)
-            .with_context(|| format!("Can't find ν{v}"))?;
-        let list: Vec<String> = vtx
-            .edges
-            .iter()
-            .map(|edge| self.edge_label_text(edge).into_owned())
-            .collect();
+        let vtx = &self.vertices.get(v).with_context(|| format!("Can't find ν{v}"))?;
+        let list: Vec<String> =
+            vtx.edges.iter().map(|edge| self.edge_label_text(edge).into_owned()).collect();
         Ok(format!(
             "ν{v}⟦{}{}⟧",
-            if vtx.persistence == Persistence::Empty {
-                ""
-            } else {
-                "Δ, "
-            },
+            if vtx.persistence == Persistence::Empty { "" } else { "Δ, " },
             list.join(", ")
         ))
     }

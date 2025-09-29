@@ -138,15 +138,10 @@ impl LabelInterner {
         let owned = key.clone_into_boxed_str();
         let canonical = Self::canonicalize_label(label)?;
         let id = self.next.allocate()?;
-        let offset = id
-            .checked_sub(1)
-            .ok_or(LabelInternerError::CapacityExceeded)?;
+        let offset = id.checked_sub(1).ok_or(LabelInternerError::CapacityExceeded)?;
         let index = usize::try_from(offset).map_err(|_| LabelInternerError::CapacityExceeded)?;
         if self.reverse.len() != index {
-            debug_assert!(
-                false,
-                "reverse table length must equal next identifier offset"
-            );
+            debug_assert!(false, "reverse table length must equal next identifier offset");
             return Err(LabelInternerError::CapacityExceeded);
         }
         self.reverse.push(owned);
@@ -305,26 +300,22 @@ impl LabelInterner {
             if *id == 0 {
                 return Err("identifier zero is reserved".into());
             }
-            let offset = id
-                .checked_sub(1)
-                .ok_or_else(|| "label identifier underflow".to_owned())?;
+            let offset =
+                id.checked_sub(1).ok_or_else(|| "label identifier underflow".to_owned())?;
             let index = usize::try_from(offset)
                 .map_err(|_| "label identifier exceeds usize range".to_owned())?;
             let entry = self
                 .reverse
                 .get(index)
                 .ok_or_else(|| "identifier does not have reverse entry".to_owned())?;
-            let expected = key
-                .canonical_text()
-                .map_err(|_| "label key is not valid UTF-8".to_owned())?;
+            let expected =
+                key.canonical_text().map_err(|_| "label key is not valid UTF-8".to_owned())?;
             let expected = expected.into_owned();
             if entry.as_ref() != expected {
                 return Err("forward and reverse entries mismatch".into());
             }
-            let canonical = self
-                .canonical
-                .get(index)
-                .ok_or_else(|| "missing canonical label".to_owned())?;
+            let canonical =
+                self.canonical.get(index).ok_or_else(|| "missing canonical label".to_owned())?;
             if canonical.to_string() != expected {
                 return Err("canonical label does not match stored text".into());
             }
@@ -346,8 +337,7 @@ impl Serialize for LabelInterner {
         S: Serializer,
     {
         #[cfg(debug_assertions)]
-        self.ensure_invariants()
-            .map_err(serde::ser::Error::custom)?;
+        self.ensure_invariants().map_err(serde::ser::Error::custom)?;
         let mut state = serializer.serialize_struct("LabelInterner", 4)?;
         state.serialize_field("forward", &self.forward)?;
         state.serialize_field("reverse", &self.reverse)?;
@@ -372,12 +362,8 @@ impl<'de> Deserialize<'de> for LabelInterner {
             next: NextLabelId,
         }
 
-        let LabelInternerSerde {
-            forward,
-            reverse,
-            canonical,
-            next,
-        } = LabelInternerSerde::deserialize(deserializer)?;
+        let LabelInternerSerde { forward, reverse, canonical, next } =
+            LabelInternerSerde::deserialize(deserializer)?;
         let canonical = if canonical.is_empty() && !reverse.is_empty() {
             let mut restored = Vec::with_capacity(reverse.len());
             for text in &reverse {
@@ -389,15 +375,8 @@ impl<'de> Deserialize<'de> for LabelInterner {
         } else {
             canonical
         };
-        let interner = Self {
-            forward,
-            reverse,
-            canonical,
-            next,
-        };
-        interner
-            .ensure_invariants()
-            .map_err(serde::de::Error::custom)?;
+        let interner = Self { forward, reverse, canonical, next };
+        interner.ensure_invariants().map_err(serde::de::Error::custom)?;
         Ok(interner)
     }
 }
@@ -499,9 +478,7 @@ impl LabelKey {
                 Ok(text) => text.into_boxed_str(),
                 Err(error) => {
                     debug_assert!(false, "label keys must remain valid UTF-8");
-                    String::from_utf8_lossy(&error.into_bytes())
-                        .into_owned()
-                        .into_boxed_str()
+                    String::from_utf8_lossy(&error.into_bytes()).into_owned().into_boxed_str()
                 }
             },
         }
@@ -689,10 +666,7 @@ mod tests {
     fn rejects_non_ascii_string_label() {
         let label = Label::Str(['α', ' ', ' ', ' ', ' ', ' ', ' ', ' ']);
         let owned = LabelKey::from_label(&label);
-        assert!(matches!(
-            owned,
-            Err(LabelInternerError::InvalidLabelCharacter('α'))
-        ));
+        assert!(matches!(owned, Err(LabelInternerError::InvalidLabelCharacter('α'))));
     }
 
     #[test]
@@ -729,10 +703,8 @@ mod tests {
 
     #[test]
     fn respects_capacity_limit() {
-        let mut interner = LabelInterner {
-            next: NextLabelId(LabelId::MAX),
-            ..LabelInterner::default()
-        };
+        let mut interner =
+            LabelInterner { next: NextLabelId(LabelId::MAX), ..LabelInterner::default() };
         let label = Label::Alpha(123);
         assert!(matches!(
             interner.get_or_intern(&label),
@@ -770,9 +742,7 @@ mod tests {
         let original = interner.get_or_intern(&label).unwrap();
         let serialized = serde::encode_to_vec(&interner, bincode::config::legacy()).unwrap();
         let mut restored: LabelInterner =
-            serde::decode_from_slice(&serialized, bincode::config::legacy())
-                .unwrap()
-                .0;
+            serde::decode_from_slice(&serialized, bincode::config::legacy()).unwrap().0;
         assert_eq!(Some(original), restored.get(&label));
         let reused = restored.get_or_intern(&label).unwrap();
         assert_eq!(original, reused);

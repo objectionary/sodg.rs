@@ -72,10 +72,7 @@ fn bench_bind_edges(c: &mut Criterion) {
     let sizes = [10, 100, 200];
     let labels = [
         ("alpha", Label::Alpha(0)),
-        (
-            "long_str",
-            Label::from_str("abcdefgh").expect("valid label"),
-        ),
+        ("long_str", Label::from_str("abcdefgh").expect("valid label")),
     ];
     let mut group = c.benchmark_group("bind_edges");
     for &(name, label) in &labels {
@@ -122,10 +119,7 @@ fn bench_label_interner_reuse(c: &mut Criterion) {
     group.throughput(Throughput::Elements(256));
     let labels = [
         ("alpha", Label::Alpha(7)),
-        (
-            "long_str",
-            Label::from_str("abcdefgh").expect("valid label"),
-        ),
+        ("long_str", Label::from_str("abcdefgh").expect("valid label")),
     ];
     for (name, label) in labels {
         group.bench_function(format!("reuse_{name}"), move |b| {
@@ -215,22 +209,18 @@ fn bench_edge_index_inserts(c: &mut Criterion) {
     for &degree in &BENCHMARK_DEGREES {
         let labels = label_ids_for_degree(degree);
         group.throughput(Throughput::Elements(labels.len() as u64));
-        group.bench_with_input(
-            BenchmarkId::from_parameter(degree),
-            &degree,
-            move |b, &_deg| {
-                // Setup provides the slice of labels; hot path constructs and populates the index.
-                b.iter_batched(
-                    || labels.clone(),
-                    |labels| {
-                        let mut index = EdgeIndex::new();
-                        populate_edge_index(&mut index, &labels);
-                        black_box(index.len());
-                    },
-                    BatchSize::SmallInput,
-                );
-            },
-        );
+        group.bench_with_input(BenchmarkId::from_parameter(degree), &degree, move |b, &_deg| {
+            // Setup provides the slice of labels; hot path constructs and populates the index.
+            b.iter_batched(
+                || labels.clone(),
+                |labels| {
+                    let mut index = EdgeIndex::new();
+                    populate_edge_index(&mut index, &labels);
+                    black_box(index.len());
+                },
+                BatchSize::SmallInput,
+            );
+        });
     }
     group.finish();
 }
@@ -242,25 +232,21 @@ fn bench_edge_index_removals(c: &mut Criterion) {
     for &degree in &BENCHMARK_DEGREES {
         let labels = label_ids_for_degree(degree);
         group.throughput(Throughput::Elements(labels.len() as u64));
-        group.bench_with_input(
-            BenchmarkId::from_parameter(degree),
-            &degree,
-            move |b, &_deg| {
-                b.iter_batched(
-                    || {
-                        let mut index = EdgeIndex::new();
-                        populate_edge_index(&mut index, &labels);
-                        (index, labels.clone())
-                    },
-                    |(mut index, labels)| {
-                        for label in labels {
-                            black_box(index.remove(label));
-                        }
-                    },
-                    BatchSize::SmallInput,
-                );
-            },
-        );
+        group.bench_with_input(BenchmarkId::from_parameter(degree), &degree, move |b, &_deg| {
+            b.iter_batched(
+                || {
+                    let mut index = EdgeIndex::new();
+                    populate_edge_index(&mut index, &labels);
+                    (index, labels.clone())
+                },
+                |(mut index, labels)| {
+                    for label in labels {
+                        black_box(index.remove(label));
+                    }
+                },
+                BatchSize::SmallInput,
+            );
+        });
     }
     group.finish();
 }
@@ -273,17 +259,13 @@ fn bench_edge_index_lookups(c: &mut Criterion) {
         let labels = label_ids_for_degree(degree);
         let index = build_edge_index(&labels);
         group.throughput(Throughput::Elements(labels.len() as u64));
-        group.bench_with_input(
-            BenchmarkId::from_parameter(degree),
-            &degree,
-            move |b, &_deg| {
-                b.iter(|| {
-                    for &label in &labels {
-                        black_box(index.get(label));
-                    }
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::from_parameter(degree), &degree, move |b, &_deg| {
+            b.iter(|| {
+                for &label in &labels {
+                    black_box(index.get(label));
+                }
+            });
+        });
     }
     group.finish();
 }
@@ -296,13 +278,9 @@ fn bench_find_multi_segment(c: &mut Criterion) {
     for &degree in &BENCHMARK_DEGREES {
         let (graph, locator) = dense_graph_with_locator::<16>(degree, FIND_DEPTH);
         group.throughput(Throughput::Elements(1));
-        group.bench_with_input(
-            BenchmarkId::from_parameter(degree),
-            &degree,
-            move |b, &_deg| {
-                b.iter(|| black_box(graph.find(0, locator.as_str())));
-            },
-        );
+        group.bench_with_input(BenchmarkId::from_parameter(degree), &degree, move |b, &_deg| {
+            b.iter(|| black_box(graph.find(0, locator.as_str())));
+        });
     }
     group.finish();
 }

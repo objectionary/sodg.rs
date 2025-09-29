@@ -44,18 +44,10 @@ digraph {
   edge [fontname=\"Arial\"];"
                 .to_string(),
         );
-        for (v, vtx) in self
-            .vertices
-            .iter()
-            .sorted_by_key(|(v, _)| <usize>::clone(v))
-        {
+        for (v, vtx) in self.vertices.iter().sorted_by_key(|(v, _)| <usize>::clone(v)) {
             lines.push(format!(
                 "  v{v}[shape=circle,label=\"ν{v}\"{}]; {}",
-                if vtx.persistence == Persistence::Empty {
-                    ""
-                } else {
-                    ",color=\"#f96900\""
-                },
+                if vtx.persistence == Persistence::Empty { "" } else { ",color=\"#f96900\"" },
                 if vtx.persistence == Persistence::Empty {
                     String::new()
                 } else {
@@ -74,14 +66,8 @@ digraph {
                 } else {
                     ""
                 };
-                let style = if label.as_str() == "π" {
-                    ",style=dashed"
-                } else {
-                    ""
-                };
-                lines.push(format!(
-                    "  v{v} -> v{destination} [label=\"{label}\"{color}{style}];"
-                ));
+                let style = if label.as_str() == "π" { ",style=dashed" } else { "" };
+                lines.push(format!("  v{v} -> v{destination} [label=\"{label}\"{color}{style}];"));
             }
         }
         lines.push("}\n".to_string());

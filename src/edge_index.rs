@@ -166,9 +166,8 @@ impl EdgeIndex {
             Self::Small(map) => {
                 if map.len() == SMALL_THRESHOLD && map.get(&label).is_none() {
                     let current_len = map.len();
-                    let expected_capacity = current_len
-                        .saturating_mul(2)
-                        .max(current_len.saturating_add(1));
+                    let expected_capacity =
+                        current_len.saturating_mul(2).max(current_len.saturating_add(1));
                     let mut promoted = LargeIndexMap::with_capacity_and_hasher(
                         expected_capacity,
                         BuildHasherDefault::<FxHasher>::default(),
@@ -219,10 +218,7 @@ mod tests {
     fn inserts_and_retrieves_entries() {
         let mut index = EdgeIndex::new();
         assert_eq!(0, index.len());
-        let entry = EdgeIndexEntry {
-            destination: 7,
-            slot: 0,
-        };
+        let entry = EdgeIndexEntry { destination: 7, slot: 0 };
         assert_eq!(None, index.insert(1, entry));
         assert_eq!(Some(entry), index.get(1));
         assert_eq!(1, index.len());
@@ -254,20 +250,8 @@ mod tests {
     #[test]
     fn removes_entries_in_both_variants() {
         let mut index = EdgeIndex::new();
-        index.insert(
-            1,
-            EdgeIndexEntry {
-                destination: 2,
-                slot: 0,
-            },
-        );
-        assert_eq!(
-            Some(EdgeIndexEntry {
-                destination: 2,
-                slot: 0,
-            }),
-            index.remove(1)
-        );
+        index.insert(1, EdgeIndexEntry { destination: 2, slot: 0 });
+        assert_eq!(Some(EdgeIndexEntry { destination: 2, slot: 0 }), index.remove(1));
         assert_eq!(None, index.remove(1));
         let threshold = u32::try_from(SMALL_THRESHOLD).expect("SMALL_THRESHOLD fits into u32");
         index.rebuild((0..=threshold).map(|label| {
@@ -280,13 +264,7 @@ mod tests {
             )
         }));
         assert!(matches!(index, EdgeIndex::Large(_)));
-        assert_eq!(
-            Some(EdgeIndexEntry {
-                destination: 2,
-                slot: 1,
-            }),
-            index.remove(1)
-        );
+        assert_eq!(Some(EdgeIndexEntry { destination: 2, slot: 1 }), index.remove(1));
         assert_eq!(None, index.get(1));
     }
 
@@ -305,15 +283,9 @@ mod tests {
                 );
             }
             if degree <= SMALL_THRESHOLD {
-                assert!(
-                    matches!(index, EdgeIndex::Small(_)),
-                    "degree {degree} should stay small"
-                );
+                assert!(matches!(index, EdgeIndex::Small(_)), "degree {degree} should stay small");
             } else {
-                assert!(
-                    matches!(index, EdgeIndex::Large(_)),
-                    "degree {degree} should promote"
-                );
+                assert!(matches!(index, EdgeIndex::Large(_)), "degree {degree} should promote");
             }
             for label in 0..degree_u32 {
                 assert_eq!(
