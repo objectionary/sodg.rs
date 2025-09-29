@@ -65,7 +65,7 @@ impl<const N: usize> Sodg<N> {
     where
         F: FnMut(usize, &str) -> Result<String>,
     {
-        if depth > MAX_FIND_RECURSION {
+        if depth >= MAX_FIND_RECURSION {
             bail!(
                 "Recursion depth limit ({MAX_FIND_RECURSION}) exceeded while resolving '{locator}' from ν{start}"
             );
@@ -89,24 +89,13 @@ impl<const N: usize> Sodg<N> {
             let current = vertex;
             let label = Label::from_str(segment.as_str())
                 .with_context(|| format!("Can't parse label '{segment}'"))?;
-            let target = {
-                let vtx = self
-                    .vertices
-                    .get(current)
-                    .with_context(|| format!("Can't find ν{current}"))?;
-                if vtx.branch == 0 {
-                    bail!("Can't find ν{current}");
-                }
-                vtx.edges
-                    .iter()
-                    .find(|(edge_label, _)| **edge_label == label)
-                    .map(|(_, to)| *to)
-            };
-            if let Some(next) = target {
+
+            if let Some(next) = self.kid(current, label) {
                 self.ensure_vertex_alive(next)?;
                 vertex = next;
                 continue;
             }
+
             let alternative = resolver(current, segment.as_str()).with_context(|| {
                 format!("Resolver failed to provide alternative for ν{current}.{segment}")
             })?;
@@ -138,7 +127,6 @@ mod tests {
     use std::str::FromStr as _;
 
     use super::*;
-
     use crate::Label;
 
     #[test]
@@ -229,3 +217,4 @@ mod tests {
         assert!(has_depth_note, "{}", err);
     }
 }
+
