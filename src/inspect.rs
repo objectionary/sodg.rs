@@ -79,7 +79,7 @@ mod tests {
         let mut g: Sodg<16> = Sodg::empty(256);
         g.add(0);
         g.add(1);
-        g.bind(0, 1, Label::Alpha(0));
+        let _ = g.bind(0, 1, Label::Alpha(0));
         g.vertices.remove(1);
         let result = g.inspect(0);
         assert!(result.is_err());

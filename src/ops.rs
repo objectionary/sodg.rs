@@ -909,7 +909,7 @@ mod tests {
         let mut g: Sodg<16> = Sodg::empty(256);
         g.add(1);
         g.add(2);
-        g.bind(1, 2, Label::Alpha(0));
+        let _ = g.bind(1, 2, Label::Alpha(0));
         let branch = g.vertices.get(1).unwrap().branch;
         assert_ne!(BRANCH_STATIC, branch);
         assert_eq!(branch, g.vertices.get(2).unwrap().branch);
@@ -923,11 +923,11 @@ mod tests {
         let mut g: Sodg<16> = Sodg::empty(256);
         g.add(1);
         g.add(2);
-        g.bind(1, 2, Label::Alpha(0));
+        let _ = g.bind(1, 2, Label::Alpha(0));
         let dynamic_branch = g.vertices.get(1).unwrap().branch;
         g.add(3);
         assert_eq!(BRANCH_STATIC, g.vertices.get(3).unwrap().branch);
-        g.bind(3, 1, Label::Alpha(1));
+        let _ = g.bind(3, 1, Label::Alpha(1));
         assert_eq!(dynamic_branch, g.vertices.get(3).unwrap().branch);
         let members: Vec<usize> = g
             .branches
@@ -947,11 +947,11 @@ mod tests {
         let mut g: Sodg<16> = Sodg::empty(256);
         g.add(1);
         g.add(2);
-        g.bind(1, 2, Label::Alpha(0));
+        let _ = g.bind(1, 2, Label::Alpha(0));
         let dynamic_branch = g.vertices.get(1).unwrap().branch;
         g.add(3);
         assert_eq!(BRANCH_STATIC, g.vertices.get(3).unwrap().branch);
-        g.bind(1, 3, Label::Alpha(1));
+        let _ = g.bind(1, 3, Label::Alpha(1));
         assert_eq!(dynamic_branch, g.vertices.get(3).unwrap().branch);
         let members: Vec<usize> = g
             .branches

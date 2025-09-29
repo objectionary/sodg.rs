@@ -4,7 +4,7 @@
 use std::collections::VecDeque;
 use std::str::FromStr;
 
-use anyhow::{Context as _, Result, bail};
+use anyhow::{bail, Context as _, Result};
 
 use crate::{Label, Sodg};
 
@@ -22,26 +22,26 @@ impl<const N: usize> Sodg<N> {
     ///
     /// # Errors
     ///
-    /// * Returns an error if any of the vertices along the path is absent.
-    /// * Returns an error if a label segment can't be parsed into a [`Label`].
-    /// * Propagates any error raised by the resolver closure.
-    /// * Returns an error if recursion depth exceeds the internal recursion limit.
+    /// Returns an error when:
+    ///
+    /// * Any vertex along the path does not exist or is not alive.
+    /// * A path segment cannot be parsed into a [`Label`].
+    /// * The `resolver` closure returns an error.
+    /// * The recursive resolution exceeds `MAX_FIND_RECURSION`.
     ///
     /// # Examples
     ///
     /// ```
     /// use std::str::FromStr as _;
-    ///
     /// use sodg::{Label, Sodg};
     ///
     /// let mut g: Sodg<16> = Sodg::empty(256);
     /// g.add(0);
     /// g.add(1);
-    /// g.bind(0, 1, Label::from_str("foo").unwrap());
-    /// let found = g
-    ///     .find_with_closure(0, "foo", |_v, _a| Ok(String::new()))
-    ///     .unwrap();
+    /// g.bind(0, 1, Label::from_str("foo")?)?;
+    /// let found = g.find_with_closure(0, "foo", |_v, _a| Ok(String::new()))?;
     /// assert_eq!(1, found);
+    /// # Ok::<(), anyhow::Error>(())
     /// ```
     pub fn find_with_closure<F>(
         &self,
@@ -77,7 +77,9 @@ impl<const N: usize> Sodg<N> {
             .filter(|segment| !segment.is_empty())
             .map(ToOwned::to_owned)
             .collect();
+
         while let Some(segment) = segments.pop_front() {
+            // Absolute jump: segment like "ν123"
             if let Some(rest) = segment.strip_prefix('ν') {
                 let id = rest
                     .parse::<usize>()
@@ -86,6 +88,8 @@ impl<const N: usize> Sodg<N> {
                 vertex = id;
                 continue;
             }
+
+            // Normal step by label
             let current = vertex;
             let label = Label::from_str(segment.as_str())
                 .with_context(|| format!("Can't parse label '{segment}'"))?;
@@ -96,6 +100,7 @@ impl<const N: usize> Sodg<N> {
                 continue;
             }
 
+            // Try alternative path from resolver
             let alternative = resolver(current, segment.as_str()).with_context(|| {
                 format!("Resolver failed to provide alternative for ν{current}.{segment}")
             })?;
@@ -124,75 +129,68 @@ impl<const N: usize> Sodg<N> {
 
 #[cfg(test)]
 mod tests {
-    use std::str::FromStr as _;
-
     use super::*;
-    use crate::Label;
 
     #[test]
-    fn finds_vertex_via_resolver() {
+    fn finds_vertex_via_resolver() -> anyhow::Result<()> {
         let mut g: Sodg<16> = Sodg::empty(256);
         g.add(1);
         g.add(2);
         g.add(3);
-        g.bind(1, 2, Label::from_str("first").unwrap());
-        g.bind(2, 3, Label::from_str("alt").unwrap());
-        let found = g
-            .find_with_closure(1, "first.second", |v, a| {
-                if v == 2 && a == "second" {
-                    Ok("alt".to_string())
-                } else {
-                    Ok(String::new())
-                }
-            })
-            .unwrap();
+        g.bind(1, 2, Label::from_str("first")?)?;
+        g.bind(2, 3, Label::from_str("alt")?)?;
+        let found = g.find_with_closure(1, "first.second", |v, a| {
+            if v == 2 && a == "second" {
+                Ok("alt".to_string())
+            } else {
+                Ok(String::new())
+            }
+        })?;
         assert_eq!(3, found);
+        Ok(())
     }
 
     #[test]
-    fn returns_start_for_empty_locator() {
+    fn returns_start_for_empty_locator() -> anyhow::Result<()> {
         let mut g: Sodg<16> = Sodg::empty(256);
         g.add(5);
-        let found = g
-            .find_with_closure(5, "", |_v, _a| Ok(String::new()))
-            .unwrap();
+        let found = g.find_with_closure(5, "", |_v, _a| Ok(String::new()))?;
         assert_eq!(5, found);
+        Ok(())
     }
 
     #[test]
-    fn redirects_through_sub_locator() {
+    fn redirects_through_sub_locator() -> anyhow::Result<()> {
         let mut g: Sodg<16> = Sodg::empty(256);
         g.add(1);
         g.add(2);
-        g.bind(1, 2, Label::from_str("xyz").unwrap());
+        g.bind(1, 2, Label::from_str("xyz")?)?;
         g.add(3);
-        g.bind(2, 3, Label::from_str("x").unwrap());
-        let found = g
-            .find_with_closure(1, "a.x", |v, a| {
-                if v == 1 && a == "a" {
-                    Ok("xyz".to_string())
-                } else {
-                    Ok(String::new())
-                }
-            })
-            .unwrap();
+        g.bind(2, 3, Label::from_str("x")?)?;
+        let found = g.find_with_closure(1, "a.x", |v, a| {
+            if v == 1 && a == "a" {
+                Ok("xyz".to_string())
+            } else {
+                Ok(String::new())
+            }
+        })?;
         assert_eq!(3, found);
+        Ok(())
     }
 
     #[test]
-    fn jumps_to_absolute_vertex() {
+    fn jumps_to_absolute_vertex() -> anyhow::Result<()> {
         let mut g: Sodg<16> = Sodg::empty(256);
         g.add(0);
         g.add(1);
-        g.bind(0, 1, Label::from_str("foo").unwrap());
-        let found = g
-            .find_with_closure(0, "bar", |_v, _a| Ok("ν1".to_string()))
-            .unwrap();
+        g.bind(0, 1, Label::from_str("foo")?)?;
+        let found = g.find_with_closure(0, "bar", |_v, _a| Ok("ν1".to_string()))?;
         assert_eq!(1, found);
+        Ok(())
     }
 
     #[test]
-    fn propagates_resolver_error() {
+    fn propagates_resolver_error() -> anyhow::Result<()> {
         let mut g: Sodg<16> = Sodg::empty(256);
         g.add(0);
         let result = g.find_with_closure(0, "bar", |_v, _a| anyhow::bail!("no alternative"));
@@ -202,10 +200,11 @@ mod tests {
             .chain()
             .any(|cause| cause.to_string().contains("no alternative"));
         assert!(has_cause, "{}", err);
+        Ok(())
     }
 
     #[test]
-    fn guards_against_recursion_overflow() {
+    fn guards_against_recursion_overflow() -> anyhow::Result<()> {
         let mut g: Sodg<16> = Sodg::empty(256);
         g.add(0);
         let result = g.find_with_closure(0, "foo", |_v, _a| Ok("foo".to_string()));
@@ -215,6 +214,7 @@ mod tests {
             .chain()
             .any(|cause| cause.to_string().contains("Recursion depth"));
         assert!(has_depth_note, "{}", err);
+        Ok(())
     }
 }
 

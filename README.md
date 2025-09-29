@@ -20,9 +20,11 @@ right after the data it contains is read _and_ no other vertices
 transitively point to it.
 
 The current implementation keeps runtime overhead low by interning edge labels
-and indexing them through a hybrid small-map/hash-map structure. Edge payloads
-are stored in a `Hex` helper that keeps tiny blobs inline and promotes larger
-values to reference-counted slices so cloning a graph snapshot stays cheap.
+and indexing them through a hybrid small-map/hash-map structure.
+Edge payloads are stored in a `Hex` helper that keeps tiny blobs inline
+and promotes larger values to reference-counted slices, so cloning a graph
+snapshot stays cheap.
+
 
 Here is how you can create a di-graph:
 
@@ -112,6 +114,7 @@ generation.
 ### Running Criterion locally
 
 1. Build and run all Criterion benchmarks:
+
    ```bash
    cargo bench --bench bench
    ```
@@ -126,6 +129,7 @@ improvements:
 
 1. Check out the branch or commit that should become the reference point (for
    example `master`) and save a baseline:
+
    ```bash
    cargo bench --bench bench -- --save-baseline master
    ```
@@ -133,6 +137,7 @@ improvements:
    branches as long as the directory is kept intact.
 2. Switch back to your working branch and compare the current code against the
    saved numbers:
+
    ```bash
    cargo bench --bench bench -- --baseline master
    ```
@@ -151,6 +156,7 @@ The Callgrind harness provides instruction- and cache-level metrics:
    Linux and other platforms with working Valgrind ports; Windows is not
    supported.
 2. Enable the `callgrind` feature and execute the harness:
+
    ```bash
    cargo bench --features callgrind --bench edge_index
    ```
