@@ -12,7 +12,7 @@
 
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter, Result as FmtResult};
-use std::hash::BuildHasherDefault;
+use std::hash::{BuildHasherDefault, Hash, Hasher};
 use std::str::{FromStr as _, Utf8Error};
 
 use std::borrow::Cow;
@@ -403,14 +403,39 @@ impl<'de> Deserialize<'de> for LabelInterner {
 }
 
 /// Owned canonical label key used as a hash-map entry.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LabelKey {
     Alpha(usize),
     Greek(char),
     Str(SmallVec<[u8; INLINE_LABEL_KEY_CAPACITY]>),
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum LabelKeyVariant {
+    Alpha,
+    Greek,
+    Str,
+}
+
+impl LabelKeyVariant {
+    const fn discriminant(self) -> u8 {
+        match self {
+            Self::Alpha => 0,
+            Self::Greek => 1,
+            Self::Str => 2,
+        }
+    }
+}
+
 impl LabelKey {
+    const fn variant(&self) -> LabelKeyVariant {
+        match self {
+            Self::Alpha(_) => LabelKeyVariant::Alpha,
+            Self::Greek(_) => LabelKeyVariant::Greek,
+            Self::Str(_) => LabelKeyVariant::Str,
+        }
+    }
+
     fn from_label(label: &Label) -> Result<Self, LabelInternerError> {
         match label {
             Label::Greek(symbol) => Ok(Self::Greek(*symbol)),
@@ -488,6 +513,21 @@ impl LabelKey {
             Ok(Cow::Borrowed(text)) => text.to_owned(),
             Ok(Cow::Owned(text)) => text,
             Err(_) => panic!("label keys must remain valid UTF-8"),
+        }
+    }
+}
+
+impl Hash for LabelKey {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        state.write_u8(self.variant().discriminant());
+        match self {
+            Self::Alpha(index) => state.write_usize(*index),
+            Self::Greek(symbol) => state.write_u32(*symbol as u32),
+            Self::Str(bytes) => {
+                for byte in bytes {
+                    state.write_u8(*byte);
+                }
+            }
         }
     }
 }
@@ -648,9 +688,9 @@ mod tests {
     #[test]
     fn rejects_non_ascii_string_label() {
         let label = Label::Str(['α', ' ', ' ', ' ', ' ', ' ', ' ', ' ']);
-        let result = LabelKey::from_label(&label);
+        let owned = LabelKey::from_label(&label);
         assert!(matches!(
-            result,
+            owned,
             Err(LabelInternerError::InvalidLabelCharacter('α'))
         ));
     }
