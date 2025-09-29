@@ -4,7 +4,7 @@
 use std::collections::VecDeque;
 use std::str::FromStr;
 
-use anyhow::{bail, Context as _, Result};
+use anyhow::{Context as _, Result, bail};
 
 use crate::{Label, Sodg};
 
@@ -217,4 +217,3 @@ mod tests {
         Ok(())
     }
 }
-

@@ -7,6 +7,7 @@ impl<const N: usize> Clone for Sodg<N> {
     /// Make a clone of the graph.
     fn clone(&self) -> Self {
         Self {
+            vertex_capacity: self.vertex_capacity,
             vertices: self.vertices.clone(),
             branches: self.branches.clone(),
             stores: self.stores.clone(),
@@ -37,5 +38,14 @@ mod tests {
         let g: Sodg<16> = Sodg::empty(256);
         let c = g.clone();
         assert_eq!(0, c.len());
+    }
+
+    #[test]
+    fn cloned_graph_allows_new_vertices() {
+        let g: Sodg<16> = Sodg::empty(256);
+        let mut clone = g.clone();
+        assert!(clone.vertices.get(7).is_none());
+        clone.add(7);
+        assert!(clone.vertices.get(7).is_some());
     }
 }

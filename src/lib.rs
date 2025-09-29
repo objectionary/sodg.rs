@@ -154,8 +154,14 @@ pub struct Script {
 ///
 /// This package is used in [reo](https://github.com/objectionary/reo)
 /// project, as a memory model for objects and dependencies between them.
+const fn default_vertex_capacity() -> usize {
+    0
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct Sodg<const N: usize> {
+    #[serde(default = "default_vertex_capacity")]
+    vertex_capacity: usize,
     stores: emap::Map<usize>,
     branches: emap::Map<BranchMembers>,
     vertices: emap::Map<Vertex<N>>,
