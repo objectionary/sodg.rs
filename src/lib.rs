@@ -8,6 +8,22 @@
 //! it's time to delete some vertices (something similar to
 //! "garbage collection").
 //!
+//! Behind the API the crate combines three performance-oriented
+//! building blocks:
+//!
+//! * Labels are interned via [`LabelInterner`], which canonicalizes each
+//!   [`Label`] into its UTF-8 representation so that high-level code keeps the
+//!   typed enum while the engine manipulates compact numeric identifiers.
+//! * Outbound edges are tracked by [`EdgeIndex`], a hybrid structure that
+//!   starts with a small, fixed-capacity map and seamlessly upgrades to a
+//!   hash map once the vertex degree grows past [`edge_index::SMALL_THRESHOLD`].
+//!   This avoids the cost of hashing in the common case but keeps large graphs
+//!   responsive.
+//! * [`Hex`] payloads use a dual representation: stack-allocated arrays serve
+//!   short blobs, while larger data is shared through reference-counted slices.
+//!   Graph traversals therefore copy as little as possible while still offering
+//!   cheap cloning semantics for read-heavy workloads.
+//!
 //! For example, here is how you create a simple
 //! di-graph with two vertices and an edge between them:
 //!
@@ -18,7 +34,7 @@
 //! let mut sodg: Sodg<16> = Sodg::empty(256);
 //! sodg.add(0);
 //! sodg.add(1);
-//! sodg.bind(0, 1, Label::from_str("foo").unwrap());
+//! sodg.bind(0, 1, Label::from_str("foo").unwrap()).unwrap();
 //! ```
 
 #![doc(html_root_url = "https://docs.rs/sodg/0.0.0")]
@@ -28,17 +44,21 @@
 #![allow(clippy::multiple_crate_versions)]
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
+use smallvec::SmallVec;
 
 mod clone;
 mod ctors;
 mod debug;
 mod dot;
+mod edge_index;
 mod find;
 mod hex;
 mod inspect;
 mod label;
+mod labels;
 mod merge;
 mod misc;
 mod next;
@@ -48,9 +68,15 @@ mod serialization;
 mod slice;
 mod xml;
 
+pub use crate::labels::{LabelId, LabelInterner, LabelInternerError};
+pub use crate::ops::{BindError, KidRef};
+pub use edge_index::{Edge, EdgeIndex, EdgeIndexEntry, SMALL_THRESHOLD};
+
 const HEX_SIZE: usize = 8;
 const MAX_BRANCHES: usize = 16;
-const MAX_BRANCH_SIZE: usize = 16;
+const BRANCH_INLINE_CAPACITY: usize = 16;
+
+type BranchMembers = SmallVec<[usize; BRANCH_INLINE_CAPACITY]>;
 
 /// An object-oriented representation of binary data
 /// in hexadecimal format, which can be put into vertices of the graph.
@@ -70,13 +96,17 @@ const MAX_BRANCH_SIZE: usize = 16;
 /// let d = Hex::from(65534_i64);
 /// assert_eq!(65534, d.to_i64().unwrap());
 /// ```
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Clone)]
 pub enum Hex {
-    Vector(Vec<u8>),
+    Shared(Arc<[u8]>),
     Bytes([u8; HEX_SIZE], usize),
 }
 
 /// A label on an edge.
+///
+/// Labels remain strongly typed through this enum, while the
+/// [`LabelInterner`] stores their canonical UTF-8 representation to match the
+/// `&str`-based expectations of external integrations.
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy, Serialize, Deserialize)]
 pub enum Label {
     Greek(char),
@@ -115,22 +145,29 @@ pub struct Script {
 /// let mut sodg: Sodg<16> = Sodg::empty(256);
 /// sodg.add(0);
 /// sodg.add(1);
-/// sodg.bind(0, 1, Label::Alpha(0));
+/// sodg.bind(0, 1, Label::Alpha(0)).unwrap();
 /// sodg.add(2);
-/// sodg.bind(1, 2, Label::Alpha(1));
+/// sodg.bind(1, 2, Label::Alpha(1)).unwrap();
 /// assert_eq!(1, sodg.kids(0).count());
 /// assert_eq!(1, sodg.kids(1).count());
 /// ```
 ///
 /// This package is used in [reo](https://github.com/objectionary/reo)
 /// project, as a memory model for objects and dependencies between them.
+const fn default_vertex_capacity() -> usize {
+    0
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct Sodg<const N: usize> {
+    #[serde(default = "default_vertex_capacity")]
+    vertex_capacity: usize,
     stores: emap::Map<usize>,
-    branches: emap::Map<microstack::Stack<usize, MAX_BRANCH_SIZE>>,
+    branches: emap::Map<BranchMembers>,
     vertices: emap::Map<Vertex<N>>,
-    /// This is the next ID of a vertex to be returned by the [`Sodg::next_v`]
-    /// function.
+    /// Interned labels that back the graph's edge metadata.
+    labels: LabelInterner,
+    /// This is the next ID of a vertex to be returned by the [`Sodg::next_v`] function.
     #[serde(skip_serializing, skip_deserializing)]
     next_v: usize,
 }
@@ -150,7 +187,9 @@ struct Vertex<const N: usize> {
     branch: usize,
     data: Hex,
     persistence: Persistence,
-    edges: micromap::Map<Label, usize, N>,
+    edges: Vec<Edge>,
+    #[serde(skip)]
+    index: EdgeIndex,
 }
 
 #[cfg(test)]
@@ -159,9 +198,5 @@ fn init() {
     use log::LevelFilter;
     use simple_logger::SimpleLogger;
 
-    SimpleLogger::new()
-        .without_timestamps()
-        .with_level(LevelFilter::Trace)
-        .init()
-        .unwrap();
+    SimpleLogger::new().without_timestamps().with_level(LevelFilter::Trace).init().unwrap();
 }

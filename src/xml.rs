@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 use anyhow::Result;
-use itertools::Itertools as _;
+use itertools::Itertools;
 use xml_builder::{XMLBuilder, XMLElement, XMLVersion};
 
 use crate::{Persistence, Sodg};
@@ -20,8 +20,8 @@ impl<const N: usize> Sodg<N> {
     /// g.add(0);
     /// g.put(0, &Hex::from_str_bytes("hello"));
     /// g.add(1);
-    /// g.bind(0, 1, Label::from_str("foo").unwrap());
-    /// g.bind(0, 1, Label::from_str("bar").unwrap());
+    /// g.bind(0, 1, Label::from_str("foo").unwrap()).unwrap();
+    /// g.bind(0, 1, Label::from_str("bar").unwrap()).unwrap();
     /// let xml = g.to_xml().unwrap();
     /// println!("{}", xml);
     /// ```
@@ -45,22 +45,23 @@ impl<const N: usize> Sodg<N> {
     /// If it's impossible to print it to XML, an [`Err`] may be returned. Problems may also
     /// be caused by XML errors from the XML builder library.
     pub fn to_xml(&self) -> Result<String> {
-        let mut xml = XMLBuilder::new()
-            .version(XMLVersion::XML1_1)
-            .encoding("UTF-8".into())
-            .build();
+        let mut xml =
+            XMLBuilder::new().version(XMLVersion::XML1_1).encoding("UTF-8".into()).build();
         let mut root = XMLElement::new("sodg");
-        for (v, vtx) in self
-            .vertices
-            .iter()
-            .sorted_by_key(|(v, _)| <usize>::clone(v))
-        {
+        for (v, vtx) in self.vertices.iter().sorted_by_key(|(v, _)| <usize>::clone(v)) {
             let mut v_node = XMLElement::new("v");
             v_node.add_attribute("id", v.to_string().as_str());
-            for e in vtx.edges.iter().sorted_by_key(|e| e.0) {
+            let mut edges = vtx
+                .edges
+                .iter()
+                .map(|edge| (self.edge_label_text(edge).into_owned(), edge.to))
+                .collect::<Vec<_>>();
+            edges.sort_by(|left, right| left.0.cmp(&right.0));
+            for (label, destination) in edges {
                 let mut e_node = XMLElement::new("e");
-                e_node.add_attribute("a", e.0.to_string().as_str());
-                e_node.add_attribute("to", e.1.to_string().as_str());
+                let to_attr = destination.to_string();
+                e_node.add_attribute("a", label.as_str());
+                e_node.add_attribute("to", to_attr.as_str());
                 v_node.add_child(e_node)?;
             }
             if vtx.persistence != Persistence::Empty {
@@ -92,21 +93,14 @@ mod tests {
         g.add(0);
         g.put(0, &Hex::from_str_bytes("hello"));
         g.add(1);
-        g.bind(0, 1, Label::from_str("foo").unwrap());
+        g.bind(0, 1, Label::from_str("foo").unwrap()).unwrap();
         let xml = g.to_xml().unwrap();
         let parser = sxd_document::parser::parse(xml.as_str()).unwrap();
         let doc = parser.as_document();
-        assert_eq!(
-            "foo",
-            evaluate_xpath(&doc, "/sodg/v[@id=0]/e[1]/@a")
-                .unwrap()
-                .string(),
-        );
+        assert_eq!("foo", evaluate_xpath(&doc, "/sodg/v[@id=0]/e[1]/@a").unwrap().string(),);
         assert_eq!(
             "68 65 6C 6C 6F",
-            evaluate_xpath(&doc, "/sodg/v[@id=0]/data")
-                .unwrap()
-                .string(),
+            evaluate_xpath(&doc, "/sodg/v[@id=0]/data").unwrap().string(),
         );
     }
 }

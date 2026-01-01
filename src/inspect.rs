@@ -4,7 +4,6 @@
 use std::collections::HashSet;
 
 use anyhow::{Context as _, Result};
-use itertools::Itertools;
 
 use crate::Sodg;
 
@@ -19,38 +18,32 @@ impl<const N: usize> Sodg<N> {
     /// If it's impossible to inspect, an error will be returned.
     pub fn inspect(&self, v: usize) -> Result<String> {
         let mut seen = HashSet::new();
-        Ok(format!(
-            "ν{}\n{}",
-            v,
-            self.inspect_v(v, &mut seen)?.join("\n"),
-        ))
+        Ok(format!("ν{}\n{}", v, self.inspect_v(v, &mut seen)?.join("\n"),))
     }
 
     fn inspect_v(&self, v: usize, seen: &mut HashSet<usize>) -> Result<Vec<String>> {
         seen.insert(v);
         let mut lines = vec![];
-        let edges = {
-            let vertex = self
-                .vertices
-                .get(v)
-                .with_context(|| format!("Can't find ν{v}"))?;
-            vertex
-                .edges
-                .iter()
-                .sorted()
-                .map(|(label, target)| (*label, *target))
-                .collect::<Vec<_>>()
-        };
-        for (label, target) in edges {
-            let skip = seen.contains(&target);
-            let suffix = if skip { "…" } else { "" };
-            lines.push(format!("  .{label} ➞ ν{target}{suffix}"));
+        let vertex = self.vertices.get(v).with_context(|| format!("Can't find ν{v}"))?;
+        let mut edges = vertex
+            .edges
+            .iter()
+            .map(|edge| (self.edge_label_text(edge).into_owned(), edge.to))
+            .collect::<Vec<_>>();
+        edges.sort_by(|left, right| left.0.cmp(&right.0));
+        for (label, destination) in edges {
+            let skip = seen.contains(&destination);
+            let mut line = format!("  .{label} ➞ ν{destination}");
+            if skip {
+                line.push('…');
+            }
+            lines.push(line);
             if skip {
                 continue;
             }
-            let inspected = self.inspect_v(target, seen)?;
-            for nested in inspected {
-                lines.push(format!("  {nested}"));
+            seen.insert(destination);
+            for text in self.inspect_v(destination, seen)? {
+                lines.push(format!("  {text}"));
             }
         }
         Ok(lines)
@@ -70,7 +63,7 @@ mod tests {
         g.put(0, &Hex::from_str_bytes("hello"));
         g.add(1);
         let txt = g.inspect(0).unwrap();
-        g.bind(0, 1, Label::Alpha(0));
+        g.bind(0, 1, Label::Alpha(0)).unwrap();
         assert_ne!(String::new(), txt);
     }
 
@@ -79,7 +72,7 @@ mod tests {
         let mut g: Sodg<16> = Sodg::empty(256);
         g.add(0);
         g.add(1);
-        g.bind(0, 1, Label::Alpha(0));
+        let _ = g.bind(0, 1, Label::Alpha(0));
         g.vertices.remove(1);
         let result = g.inspect(0);
         assert!(result.is_err());
