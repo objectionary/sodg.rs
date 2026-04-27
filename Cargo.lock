@@ -498,11 +498,10 @@ checksum = "32a282da65faaf38286cf3be983213fcf1d2e2a58700e808f83f4ea9a4804bc0"
 
 [[package]]
 name = "micromap"
-version = "0.1.0"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "18c087666f377f857b49564f8791b481260c67825d6b337e1e38ddf54a985a88"
+checksum = "c2a86d3146ed3995b5913c414f6664344b9617457320782e64f0bb44afd49d74"
 dependencies = [
- "bincode",
  "serde",
 ]
 
