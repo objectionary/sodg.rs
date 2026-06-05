@@ -68,24 +68,14 @@ digraph {
                     e.1,
                     e.0,
                     match e.0 {
-                        Label::Greek(g) => {
-                            if *g == 'ρ' || *g == 'σ' {
-                                ",color=gray,fontcolor=gray"
-                            } else {
-                                ""
-                            }
+                        Label::Greek(g) if *g == 'ρ' || *g == 'σ' => {
+                            ",color=gray,fontcolor=gray"
                         }
-                        _ => {
-                            ""
-                        }
+                        _ => "",
                     },
                     match e.0 {
-                        Label::Greek(g) => {
-                            if *g == 'π' { ",style=dashed" } else { "" }
-                        }
-                        _ => {
-                            ""
-                        }
+                        Label::Greek(g) if *g == 'π' => ",style=dashed",
+                        _ => "",
                     }
                 ));
             }
