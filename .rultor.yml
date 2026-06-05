@@ -13,7 +13,7 @@ merge:
     cargo --color=never test -vv
     cargo --color=never fmt --check
     cargo doc --no-deps
-    cargo clippy
+    cargo clippy --all-targets --all-features
 release:
   pre: false
   script: |-
@@ -23,7 +23,7 @@ release:
     cargo --color=never test --all-features -vv -- --nocapture
     cargo --color=never test --all-features --release -vv -- --nocapture
     cargo --color=never fmt --check
-    cargo --color=never clippy -- --no-deps
+    cargo --color=never clippy --all-targets --all-features -- --no-deps
     git commit -am "${tag}"
     mkdir -p ~/.cargo && cp ../credentials ~/.cargo
     cargo --color=never publish
