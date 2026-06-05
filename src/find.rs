@@ -228,4 +228,50 @@ mod tests {
             .any(|cause| cause.to_string().contains("Recursion depth"));
         assert!(has_depth_note, "{}", err);
     }
+
+    #[test]
+    fn errors_when_start_vertex_is_missing() {
+        let g: Sodg<16> = Sodg::empty(256);
+        let result = g.find_with_closure(7, "foo", |_v, _a| Ok(String::new()));
+        assert!(result.is_err());
+        let err = result.err().unwrap();
+        let mentions_missing = err.chain().any(|cause| cause.to_string().contains("ν7"));
+        assert!(mentions_missing, "{}", err);
+    }
+
+    #[test]
+    fn errors_when_nu_segment_is_not_numeric() {
+        let mut g: Sodg<16> = Sodg::empty(256);
+        g.add(0);
+        let result = g.find_with_closure(0, "νabc", |_v, _a| Ok(String::new()));
+        assert!(result.is_err());
+        let err = result.err().unwrap();
+        let mentions_segment = err.chain().any(|cause| cause.to_string().contains("νabc"));
+        assert!(mentions_segment, "{}", err);
+    }
+
+    #[test]
+    fn errors_when_absolute_jump_targets_missing_vertex() {
+        let mut g: Sodg<16> = Sodg::empty(256);
+        g.add(0);
+        let result = g.find_with_closure(0, "ν9", |_v, _a| Ok(String::new()));
+        assert!(result.is_err());
+        let err = result.err().unwrap();
+        let mentions_target = err.chain().any(|cause| cause.to_string().contains("ν9"));
+        assert!(mentions_target, "{}", err);
+    }
+
+    #[test]
+    fn errors_when_label_segment_is_too_long() {
+        let mut g: Sodg<16> = Sodg::empty(256);
+        g.add(0);
+        let too_long = "abcdefghi";
+        let result = g.find_with_closure(0, too_long, |_v, _a| Ok(String::new()));
+        assert!(result.is_err());
+        let err = result.err().unwrap();
+        let mentions_label = err
+            .chain()
+            .any(|cause| cause.to_string().contains(too_long));
+        assert!(mentions_label, "{}", err);
+    }
 }
