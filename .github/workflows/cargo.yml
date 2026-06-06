@@ -27,5 +27,5 @@ jobs:
       - run: cargo --color=never test --all-features --release -vv -- --nocapture
       - run: cargo --color=never fmt --check
       - run: cargo --color=never doc --no-deps
-      - run: cargo --color=never clippy -- --no-deps
+      - run: cargo --color=never clippy --all-targets --all-features -- --no-deps
       - run: cargo --color=never bench -vv -- --nocapture
