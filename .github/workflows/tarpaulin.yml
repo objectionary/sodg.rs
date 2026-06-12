@@ -26,7 +26,7 @@ jobs:
       - name: Run tarpaulin
         run: |
           cargo tarpaulin --out Xml --all-features --exclude-files src/lib.rs -- --test-threads 1
-      - uses: codecov/codecov-action@v5
+      - uses: codecov/codecov-action@v7
         if: github.repository == 'objectionary/sodg'
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
