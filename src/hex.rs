@@ -1017,4 +1017,112 @@ mod tests {
         let res = String::from_utf8(b.to_vec()).unwrap();
         assert_eq!(&res, ", world!");
     }
+
+    #[test]
+    #[should_panic(expected = "Index 3 out of bounds (len = 3)")]
+    fn index_panic_for_bytes() {
+        let h = Hex::from_slice(&[1, 2, 3]);
+        let _ = h[3];
+    }
+
+    #[test]
+    #[should_panic(expected = "Range 2..5 out of bounds (len = 3)")]
+    fn range_panic_for_bytes() {
+        let h = Hex::from_slice(&[1, 2, 3]);
+        let _ = &h[2..5];
+    }
+    
+    #[test]
+    #[should_panic(expected = "RangeFrom 4.. out of bounds (len = 3)")]
+    fn range_from_panic_for_bytes() {
+        let h = Hex::from_slice(&[1, 2, 3]);
+        let _ = &h[4..];
+    }
+    
+    #[test]
+    #[should_panic(expected = "RangeInclusive 1..=3 out of bounds (len = 3)")]
+    fn range_inclusive_panic_for_bytes() {
+        let h = Hex::from_slice(&[1, 2, 3]);
+        let _ = &h[1..=3];
+    }
+
+    #[test]
+    fn concat_transition_to_vector() {
+        let mut a = Hex::empty();
+        let mut b = Hex::empty();
+        
+        for i in 0..HEX_SIZE {
+            a = a.concat(&Hex::from_slice(&[i as u8]));
+            b = b.concat(&Hex::from_slice(&[i as u8]));
+        }
+        
+        let c = a.concat(&b);
+        assert!(matches!(c, Hex::Vector(_)));
+        assert_eq!(c.len(), HEX_SIZE * 2);
+    }
+
+    #[test]
+    fn false_boolean_conversion() {
+        let h = Hex::from(false);
+        assert!(!h.to_bool());
+    }
+    
+    #[test]
+    fn non_standard_boolean() {
+        let h = Hex::from_slice(&[2]);
+        assert!(h.to_bool());
+    }
+
+    #[test]
+    fn float_special_values() {
+        let nan = Hex::from(f64::NAN);
+        assert!(nan.to_f64().unwrap().is_nan());
+        
+        let inf = Hex::from(f64::INFINITY);
+        assert_eq!(inf.to_f64().unwrap(), f64::INFINITY);
+        
+        let neg_zero = Hex::from(-0.0f64);
+        assert_eq!(neg_zero.to_f64().unwrap().to_bits(), (-0.0f64).to_bits());
+    }
+
+    #[test]
+    fn from_str_without_dashes() {
+        let h = Hex::from_str("DEADBEEF").unwrap();
+        assert_eq!(h.print(), "DE-AD-BE-EF");
+    }
+    
+    #[test]
+    fn from_str_odd_length() {
+        let result = Hex::from_str("ABC");
+        assert!(result.is_err());
+    }
+    
+    #[test]
+    fn from_str_invalid_chars() {
+        let result = Hex::from_str("DE-AD-BE-EG");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn equality_between_variants() {
+        let bytes = Hex::from_slice(&[1, 2, 3]);
+        let vector = Hex::from_vec(vec![1, 2, 3]);
+        assert_eq!(bytes, vector);
+    }
+    
+    #[test]
+    fn min_max_integer_conversions() {
+        let min = Hex::from(i64::MIN);
+        assert_eq!(min.to_i64().unwrap(), i64::MIN);
+        
+        let max = Hex::from(i64::MAX);
+        assert_eq!(max.to_i64().unwrap(), i64::MAX);
+    }
+    
+    #[test]
+    fn float_negative_conversion() {
+        let val = -123.456f64;
+        let h = Hex::from(val);
+        assert_eq!(h.to_f64().unwrap(), val);
+    }
 }
