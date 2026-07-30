@@ -3,7 +3,7 @@
 
 //! Interning of edge labels into compact numeric identifiers.
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 use crate::Label;
 
@@ -12,65 +12,70 @@ pub type LabelId = u32;
 
 /// Assigns a stable [`LabelId`] to every distinct [`Label`].
 ///
-/// Labels are compared by their textual representation, so two labels that
-/// print the same share one identifier. Identifiers start at one, which lets
-/// zero denote the absence of a label.
+/// A [`Label`] is a wide value, because its `Str` variant carries eight
+/// `char`s. Every edge of a vertex keeps one, and every lookup compares them
+/// one by one. An identifier is four bytes, so a map keyed by identifiers
+/// packs more edges into a cache line and compares them in a single
+/// instruction.
 ///
-/// # Examples
+/// Identifiers are handed out in the order of interning, starting from one,
+/// which leaves zero free to denote the absence of a label.
 ///
 /// ```
 /// use sodg::{Label, LabelInterner};
 /// let mut interner = LabelInterner::default();
-/// let id = interner.intern(&Label::Alpha(7));
-/// assert_eq!(id, interner.intern(&Label::Alpha(7)));
-/// assert_eq!(Some("α7"), interner.resolve(id));
+/// let id = interner.intern(Label::Alpha(7));
+/// assert_eq!(id, interner.intern(Label::Alpha(7)));
+/// assert_eq!(Some(Label::Alpha(7)), interner.resolve(id));
 /// ```
 #[derive(Debug, Default, Clone)]
 pub struct LabelInterner {
-    ids: HashMap<String, LabelId>,
-    texts: Vec<String>,
+    ids: FxHashMap<Label, LabelId>,
+    labels: Vec<Label>,
 }
 
 impl LabelInterner {
-    /// Return the identifier of the label, assigning a new one if needed.
+    /// Return the identifier of the label, assigning a new one if the label
+    /// is seen for the first time.
     ///
     /// # Panics
     ///
-    /// Panics if more than [`u32::MAX`] distinct labels were interned.
-    pub fn intern(&mut self, label: &Label) -> LabelId {
-        let text = label.to_string();
-        if let Some(id) = self.ids.get(&text) {
+    /// Panics if more than [`u32::MAX`] distinct labels are interned.
+    pub fn intern(&mut self, label: Label) -> LabelId {
+        if let Some(id) = self.ids.get(&label) {
             return *id;
         }
-        let id = LabelId::try_from(self.texts.len() + 1).expect("too many labels interned");
-        self.ids.insert(text.clone(), id);
-        self.texts.push(text);
+        let id = LabelId::try_from(self.labels.len() + 1).expect("Too many labels interned");
+        self.ids.insert(label, id);
+        self.labels.push(label);
         id
     }
 
-    /// Return the identifier of an already interned label.
+    /// Return the identifier of an already interned label, or [`None`]
+    /// if the label was never interned.
     #[must_use]
-    pub fn get(&self, label: &Label) -> Option<LabelId> {
-        self.ids.get(&label.to_string()).copied()
+    pub fn get(&self, label: Label) -> Option<LabelId> {
+        self.ids.get(&label).copied()
     }
 
-    /// Return the text of the label behind the identifier.
+    /// Return the label behind the identifier, or [`None`] if the identifier
+    /// was never handed out by [`LabelInterner::intern`].
     #[must_use]
-    pub fn resolve(&self, id: LabelId) -> Option<&str> {
+    pub fn resolve(&self, id: LabelId) -> Option<Label> {
         let index = usize::try_from(id).ok()?.checked_sub(1)?;
-        self.texts.get(index).map(String::as_str)
+        self.labels.get(index).copied()
     }
 
     /// Return how many distinct labels are interned.
     #[must_use]
     pub const fn len(&self) -> usize {
-        self.texts.len()
+        self.labels.len()
     }
 
     /// Return `true` if nothing is interned yet.
     #[must_use]
     pub const fn is_empty(&self) -> bool {
-        self.texts.is_empty()
+        self.labels.is_empty()
     }
 }
 
@@ -84,8 +89,8 @@ mod tests {
     fn assigns_the_same_id_to_equal_labels() {
         let mut interner = LabelInterner::default();
         assert_eq!(
-            interner.intern(&Label::Alpha(1)),
-            interner.intern(&Label::Alpha(1))
+            interner.intern(Label::Alpha(1)),
+            interner.intern(Label::Alpha(1))
         );
     }
 
@@ -93,22 +98,42 @@ mod tests {
     fn assigns_different_ids_to_different_labels() {
         let mut interner = LabelInterner::default();
         assert_ne!(
-            interner.intern(&Label::Alpha(1)),
-            interner.intern(&Label::Alpha(2))
+            interner.intern(Label::Alpha(1)),
+            interner.intern(Label::Alpha(2))
+        );
+    }
+
+    #[test]
+    fn tells_apart_labels_of_different_variants() {
+        let mut interner = LabelInterner::default();
+        assert_ne!(
+            interner.intern(Label::Greek('α')),
+            interner.intern(Label::from_str("α5").unwrap())
         );
     }
 
     #[test]
     fn never_assigns_zero() {
         let mut interner = LabelInterner::default();
-        assert_ne!(0, interner.intern(&Label::Greek('ρ')));
+        assert_ne!(0, interner.intern(Label::Greek('ρ')));
     }
 
     #[test]
     fn resolves_interned_label() {
         let mut interner = LabelInterner::default();
-        let id = interner.intern(&Label::from_str("foo").unwrap());
-        assert_eq!(Some("foo"), interner.resolve(id));
+        let label = Label::from_str("foo").unwrap();
+        let id = interner.intern(label);
+        assert_eq!(Some(label), interner.resolve(id));
+    }
+
+    #[test]
+    fn resolves_every_interned_label() {
+        let mut interner = LabelInterner::default();
+        let labels = [Label::Greek('φ'), Label::Alpha(0), Label::Alpha(9)];
+        let ids: Vec<LabelId> = labels.iter().map(|l| interner.intern(*l)).collect();
+        for (label, id) in labels.iter().zip(ids) {
+            assert_eq!(Some(*label), interner.resolve(id));
+        }
     }
 
     #[test]
@@ -118,25 +143,42 @@ mod tests {
     }
 
     #[test]
+    fn resolves_nothing_for_zero() {
+        let mut interner = LabelInterner::default();
+        interner.intern(Label::Alpha(1));
+        assert_eq!(None, interner.resolve(0));
+    }
+
+    #[test]
     fn finds_interned_label() {
         let mut interner = LabelInterner::default();
-        let id = interner.intern(&Label::Alpha(3));
-        assert_eq!(Some(id), interner.get(&Label::Alpha(3)));
+        let id = interner.intern(Label::Alpha(3));
+        assert_eq!(Some(id), interner.get(Label::Alpha(3)));
     }
 
     #[test]
     fn finds_nothing_for_absent_label() {
         let interner = LabelInterner::default();
-        assert_eq!(None, interner.get(&Label::Alpha(3)));
+        assert_eq!(None, interner.get(Label::Alpha(3)));
     }
 
     #[test]
     fn counts_interned_labels() {
         let mut interner = LabelInterner::default();
         assert!(interner.is_empty());
-        interner.intern(&Label::Alpha(1));
-        interner.intern(&Label::Alpha(1));
-        interner.intern(&Label::Alpha(2));
+        interner.intern(Label::Alpha(1));
+        interner.intern(Label::Alpha(1));
+        interner.intern(Label::Alpha(2));
         assert_eq!(2, interner.len());
+    }
+
+    #[test]
+    fn keeps_ids_stable_while_growing() {
+        let mut interner = LabelInterner::default();
+        let first = interner.intern(Label::Alpha(1));
+        for i in 2..100 {
+            interner.intern(Label::Alpha(i));
+        }
+        assert_eq!(first, interner.intern(Label::Alpha(1)));
     }
 }
