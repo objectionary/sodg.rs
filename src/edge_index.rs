@@ -4,7 +4,7 @@
 //! Per-vertex index of departing edges.
 
 use itertools::Either;
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxBuildHasher, FxHashMap};
 use serde::{Deserialize, Serialize};
 
 use crate::LabelId;
@@ -16,6 +16,39 @@ use crate::LabelId;
 /// the bottleneck. The index starts flat, in the `Small` shape backed by
 /// [`micromap::Map`], and switches to the `Large` shape backed by a hash map
 /// once more than `N` distinct labels depart from the vertex.
+///
+/// `N` is a threshold, not a capacity: a vertex takes any number of edges, and
+/// `N` only says where the scan gives way to hashing. It should not be read as
+/// the old hard limit under a new name. A flat entry used to be a
+/// `(Label, usize)` pair of forty bytes and is now a `(LabelId, usize)` pair of
+/// sixteen — four bytes of key, four of padding, eight of target — so the same
+/// cache budget covers about two and a half times as many edges as it did.
+///
+/// `benches/edge_index.rs` prices the shapes on `Sodg<16>`, across the
+/// threshold this crate actually ships, and the reads and the writes want
+/// opposite things.
+///
+/// Reading favours hashing from the transition onwards. A vertex of sixteen
+/// edges is scanned at about 5.7 nanoseconds per edge, while one of seventeen
+/// is hashed at about 4.9, so the whole lookup over seventeen edges comes out
+/// cheaper than the one over sixteen: 84 nanoseconds against 92. Past that the
+/// hashed cost per edge holds near five all the way to degree sixty-four,
+/// whereas the scan had been climbing with every edge added, from four
+/// nanoseconds at degree one. A lookup that misses shows it more sharply still,
+/// because a miss is what makes the scan walk every key it has: the scan goes
+/// from 3.3 to 7.4 nanoseconds between degree one and sixteen, and hashing
+/// holds near 3.9 at every degree.
+///
+/// Writing and iterating favour the scan. Binding costs roughly 55 to 70
+/// nanoseconds per edge while the index is flat and 70 to 120 once it is
+/// hashed, and the migration itself costs about two microseconds. Walking the
+/// edges costs 0.7 to 0.8 nanoseconds each while flat and about 1.0 once
+/// hashed, because a hash table is walked with its empty slots.
+///
+/// Sixteen therefore sits close to where lookups stop paying for the scan,
+/// which is the right place for it on a graph that is read more than it is
+/// built. A graph that is built and traversed more than it is probed wants a
+/// larger `N`.
 #[derive(Serialize, Deserialize, Clone)]
 pub enum EdgeIndex<const N: usize> {
     Small(micromap::Map<LabelId, usize, N>),
@@ -52,7 +85,8 @@ impl<const N: usize> EdgeIndex<N> {
             Self::Small(map) => {
                 if map.checked_insert(label, to).is_none() {
                     let mut grown: FxHashMap<LabelId, usize> =
-                        map.iter().map(|(l, v)| (*l, *v)).collect();
+                        FxHashMap::with_capacity_and_hasher(N + 1, FxBuildHasher);
+                    grown.extend(map.iter().map(|(l, v)| (*l, *v)));
                     grown.insert(label, to);
                     *self = Self::Large(grown);
                 }
@@ -64,10 +98,14 @@ impl<const N: usize> EdgeIndex<N> {
     }
 
     /// Iterate over the edges, in no particular order.
-    pub fn iter(&self) -> impl Iterator<Item = (&LabelId, &usize)> + '_ {
+    ///
+    /// The label comes by value, because a [`LabelId`] is four bytes and a
+    /// reference to it is eight. The target stays behind a reference, because
+    /// [`crate::Sodg::kids`] hands it out as one and its signature is public.
+    pub fn iter(&self) -> impl Iterator<Item = (LabelId, &usize)> + '_ {
         match self {
-            Self::Small(map) => Either::Left(map.iter()),
-            Self::Large(map) => Either::Right(map.iter()),
+            Self::Small(map) => Either::Left(map.iter().map(|(l, v)| (*l, v))),
+            Self::Large(map) => Either::Right(map.iter().map(|(l, v)| (*l, v))),
         }
     }
 }

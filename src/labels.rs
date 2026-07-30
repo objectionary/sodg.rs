@@ -3,8 +3,9 @@
 
 //! Interning of edge labels into compact numeric identifiers.
 
-use rustc_hash::FxHashMap;
-use serde::{Deserialize, Serialize};
+use rustc_hash::{FxBuildHasher, FxHashMap};
+use serde::de::Error as _;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::Label;
 
@@ -22,17 +23,33 @@ pub type LabelId = u32;
 /// Identifiers are handed out in the order of interning, starting from one,
 /// which leaves zero free to denote the absence of a label.
 ///
-/// ```
-/// use sodg::{Label, LabelInterner};
-/// let mut interner = LabelInterner::default();
-/// let id = interner.intern(Label::Alpha(7));
-/// assert_eq!(id, interner.intern(Label::Alpha(7)));
-/// assert_eq!(Some(Label::Alpha(7)), interner.resolve(id));
-/// ```
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+/// Only the labels travel through [`serde`]. The map from a label back to its
+/// identifier is a lookup cache, fully derivable from them, so serializing it
+/// would write every label twice and let the two halves disagree after a
+/// hand-edit; it is rebuilt on the way in instead.
+#[derive(Debug, Default, Clone)]
 pub struct LabelInterner {
     ids: FxHashMap<Label, LabelId>,
     labels: Vec<Label>,
+}
+
+impl Serialize for LabelInterner {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.labels.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for LabelInterner {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let labels = Vec::<Label>::deserialize(deserializer)?;
+        let count = LabelId::try_from(labels.len())
+            .map_err(|_| D::Error::custom("Too many labels to intern"))?;
+        let mut ids = FxHashMap::with_capacity_and_hasher(labels.len(), FxBuildHasher);
+        for (id, label) in (1..=count).zip(&labels) {
+            ids.entry(*label).or_insert(id);
+        }
+        Ok(Self { ids, labels })
+    }
 }
 
 impl LabelInterner {
@@ -72,18 +89,6 @@ impl LabelInterner {
     pub fn resolve_ref(&self, id: LabelId) -> Option<&Label> {
         let index = usize::try_from(id).ok()?.checked_sub(1)?;
         self.labels.get(index)
-    }
-
-    /// Return how many distinct labels are interned.
-    #[must_use]
-    pub const fn len(&self) -> usize {
-        self.labels.len()
-    }
-
-    /// Return `true` if nothing is interned yet.
-    #[must_use]
-    pub const fn is_empty(&self) -> bool {
-        self.labels.is_empty()
     }
 }
 
@@ -171,13 +176,80 @@ mod tests {
     }
 
     #[test]
-    fn counts_interned_labels() {
+    fn hands_out_no_identifier_for_a_repeated_label() {
         let mut interner = LabelInterner::default();
-        assert!(interner.is_empty());
         interner.intern(Label::Alpha(1));
         interner.intern(Label::Alpha(1));
         interner.intern(Label::Alpha(2));
-        assert_eq!(2, interner.len());
+        assert_eq!(Some(Label::Alpha(2)), interner.resolve(2));
+        assert_eq!(None, interner.resolve(3));
+    }
+
+    #[test]
+    fn interns_and_resolves_the_same_label() {
+        let mut interner = LabelInterner::default();
+        let id = interner.intern(Label::Alpha(7));
+        assert_eq!(id, interner.intern(Label::Alpha(7)));
+        assert_eq!(Some(Label::Alpha(7)), interner.resolve(id));
+    }
+
+    fn round_trip(interner: &LabelInterner) -> LabelInterner {
+        let bytes = bincode::serde::encode_to_vec(interner, bincode::config::legacy()).unwrap();
+        bincode::serde::decode_from_slice(&bytes, bincode::config::legacy())
+            .unwrap()
+            .0
+    }
+
+    #[test]
+    fn rebuilds_the_lookup_map_after_a_round_trip() {
+        let mut interner = LabelInterner::default();
+        interner.intern(Label::Alpha(1));
+        let id = interner.intern(Label::Greek('φ'));
+        let after = round_trip(&interner);
+        assert_eq!(Some(id), after.get(Label::Greek('φ')));
+        assert_eq!(Some(Label::Greek('φ')), after.resolve(id));
+        assert_eq!(Some(Label::Alpha(1)), after.resolve(1));
+        assert_eq!(None, after.resolve(3));
+    }
+
+    #[test]
+    fn keeps_interning_where_it_left_off_after_a_round_trip() {
+        let mut interner = LabelInterner::default();
+        let first = interner.intern(Label::Alpha(1));
+        let mut after = round_trip(&interner);
+        let second = after.intern(Label::Alpha(2));
+        assert_ne!(first, second);
+        assert_eq!(first, after.intern(Label::Alpha(1)));
+        assert_eq!(Some(Label::Alpha(2)), after.resolve(second));
+    }
+
+    #[test]
+    fn writes_every_label_once() {
+        let mut interner = LabelInterner::default();
+        interner.intern(Label::Alpha(1));
+        let one = bincode::serde::encode_to_vec(&interner, bincode::config::legacy())
+            .unwrap()
+            .len();
+        interner.intern(Label::Alpha(2));
+        let two = bincode::serde::encode_to_vec(&interner, bincode::config::legacy())
+            .unwrap()
+            .len();
+        let label = bincode::serde::encode_to_vec(Label::Alpha(1), bincode::config::legacy())
+            .unwrap()
+            .len();
+        assert_eq!(label, two - one);
+    }
+
+    #[test]
+    fn keeps_the_first_identifier_of_a_repeated_label() {
+        let labels = vec![Label::Alpha(1), Label::Alpha(1)];
+        let bytes = bincode::serde::encode_to_vec(&labels, bincode::config::legacy()).unwrap();
+        let after: LabelInterner =
+            bincode::serde::decode_from_slice(&bytes, bincode::config::legacy())
+                .unwrap()
+                .0;
+        assert_eq!(Some(1), after.get(Label::Alpha(1)));
+        assert_eq!(Some(Label::Alpha(1)), after.resolve(2));
     }
 
     #[test]

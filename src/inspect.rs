@@ -4,7 +4,6 @@
 use std::collections::HashSet;
 
 use anyhow::{Context as _, Result};
-use itertools::Itertools;
 
 use crate::Sodg;
 
@@ -34,20 +33,20 @@ impl<const N: usize> Sodg<N> {
                 .vertices
                 .get(v)
                 .with_context(|| format!("Can't find ν{v}"))?;
-            vertex
+            let mut edges = vertex
                 .edges
                 .iter()
                 .map(|(label, target)| {
-                    (
-                        *self
-                            .labels
-                            .resolve_ref(*label)
-                            .expect("Edge label was never interned"),
-                        *target,
-                    )
+                    self.labels
+                        .resolve_ref(label)
+                        .map(|a| (*a, *target))
+                        .with_context(|| {
+                            format!("The edge ν{v} → ν{target} carries label #{label}, which this graph never interned")
+                        })
                 })
-                .sorted()
-                .collect::<Vec<_>>()
+                .collect::<Result<Vec<_>>>()?;
+            edges.sort_unstable();
+            edges
         };
         for (label, target) in edges {
             let skip = seen.contains(&target);

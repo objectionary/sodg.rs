@@ -51,7 +51,7 @@ mod slice;
 mod xml;
 
 use crate::edge_index::EdgeIndex;
-pub use crate::labels::{LabelId, LabelInterner};
+pub(crate) use crate::labels::{LabelId, LabelInterner};
 
 const HEX_SIZE: usize = 8;
 const MAX_BRANCHES: usize = 16;
@@ -126,6 +126,13 @@ pub struct Script {
 /// assert_eq!(1, sodg.kids(0).count());
 /// assert_eq!(1, sodg.kids(1).count());
 /// ```
+///
+/// The constant parameter `N` is the number of departing edges a vertex keeps
+/// in a flat array before the index of that vertex turns into a hash map. It
+/// is a threshold and not a limit: a vertex takes any number of edges, and `N`
+/// only decides where the linear scan gives way to hashing. Keep it above the
+/// degree of a typical vertex; a graph of mostly small vertices is best served
+/// by an `N` that no vertex reaches.
 ///
 /// This package is used in [reo](https://github.com/objectionary/reo)
 /// project, as a memory model for objects and dependencies between them.
