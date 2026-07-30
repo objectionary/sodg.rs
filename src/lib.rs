@@ -35,10 +35,12 @@ mod clone;
 mod ctors;
 mod debug;
 mod dot;
+mod edge_index;
 mod find;
 mod hex;
 mod inspect;
 mod label;
+mod labels;
 mod merge;
 mod misc;
 mod next;
@@ -47,6 +49,9 @@ mod script;
 mod serialization;
 mod slice;
 mod xml;
+
+use crate::edge_index::EdgeIndex;
+pub(crate) use crate::labels::{LabelId, LabelInterner};
 
 const HEX_SIZE: usize = 8;
 const MAX_BRANCHES: usize = 16;
@@ -122,6 +127,13 @@ pub struct Script {
 /// assert_eq!(1, sodg.kids(1).count());
 /// ```
 ///
+/// The constant parameter `N` is the number of departing edges a vertex keeps
+/// in a flat array before the index of that vertex turns into a hash map. It
+/// is a threshold and not a limit: a vertex takes any number of edges, and `N`
+/// only decides where the linear scan gives way to hashing. Keep it above the
+/// degree of a typical vertex; a graph of mostly small vertices is best served
+/// by an `N` that no vertex reaches.
+///
 /// This package is used in [reo](https://github.com/objectionary/reo)
 /// project, as a memory model for objects and dependencies between them.
 #[derive(Serialize, Deserialize)]
@@ -129,6 +141,7 @@ pub struct Sodg<const N: usize> {
     stores: emap::Map<usize>,
     branches: emap::Map<microstack::Stack<usize, MAX_BRANCH_SIZE>>,
     vertices: emap::Map<Vertex<N>>,
+    labels: LabelInterner,
     /// This is the next ID of a vertex to be returned by the [`Sodg::next_v`]
     /// function.
     #[serde(skip_serializing, skip_deserializing)]
@@ -150,7 +163,7 @@ struct Vertex<const N: usize> {
     branch: usize,
     data: Hex,
     persistence: Persistence,
-    edges: micromap::Map<Label, usize, N>,
+    edges: EdgeIndex<N>,
 }
 
 #[cfg(test)]
