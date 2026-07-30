@@ -83,6 +83,31 @@ mod tests {
     }
 
     #[test]
+    fn saves_and_loads_edges_with_their_labels() {
+        let mut g: Sodg<16> = Sodg::empty(256);
+        g.add(0);
+        g.add(1);
+        g.add(2);
+        g.bind(0, 1, Label::from_str("foo").unwrap());
+        g.bind(0, 2, Label::Alpha(7));
+        let tmp = TempDir::new().unwrap();
+        let file = tmp.path().join("foo.sodg");
+        g.save(file.as_path()).unwrap();
+        let after: Sodg<16> = Sodg::load(file.as_path()).unwrap();
+        assert_eq!(
+            Some(1),
+            after.kid(0, Label::from_str("foo").unwrap()),
+            "the textual label did not survive the round trip"
+        );
+        assert_eq!(
+            Some(2),
+            after.kid(0, Label::Alpha(7)),
+            "the alpha label did not survive the round trip"
+        );
+        assert_eq!(g.to_xml().unwrap(), after.to_xml().unwrap());
+    }
+
+    #[test]
     fn saves_and_loads() {
         let mut g: Sodg<1> = Sodg::empty(100);
         g.add(0);

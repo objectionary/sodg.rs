@@ -35,6 +35,7 @@ mod clone;
 mod ctors;
 mod debug;
 mod dot;
+mod edge_index;
 mod find;
 mod hex;
 mod inspect;
@@ -49,6 +50,7 @@ mod serialization;
 mod slice;
 mod xml;
 
+use crate::edge_index::EdgeIndex;
 pub use crate::labels::{LabelId, LabelInterner};
 
 const HEX_SIZE: usize = 8;
@@ -132,6 +134,7 @@ pub struct Sodg<const N: usize> {
     stores: emap::Map<usize>,
     branches: emap::Map<microstack::Stack<usize, MAX_BRANCH_SIZE>>,
     vertices: emap::Map<Vertex<N>>,
+    labels: LabelInterner,
     /// This is the next ID of a vertex to be returned by the [`Sodg::next_v`]
     /// function.
     #[serde(skip_serializing, skip_deserializing)]
@@ -153,7 +156,7 @@ struct Vertex<const N: usize> {
     branch: usize,
     data: Hex,
     persistence: Persistence,
-    edges: micromap::Map<Label, usize, N>,
+    edges: EdgeIndex<N>,
 }
 
 #[cfg(test)]

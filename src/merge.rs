@@ -130,10 +130,17 @@ impl<const N: usize> Sodg<N> {
     fn join(&mut self, left: usize, right: usize) {
         for v in self.keys() {
             let mut nv = self.vertices.get(v).unwrap().clone();
-            for e in &self.vertices.get_mut(v).unwrap().edges {
-                if *e.1 == right {
-                    nv.edges.insert(*e.0, left);
-                }
+            let repointed: Vec<u32> = self
+                .vertices
+                .get(v)
+                .unwrap()
+                .edges
+                .iter()
+                .filter(|(_, to)| **to == right)
+                .map(|(label, _)| *label)
+                .collect();
+            for label in repointed {
+                nv.edges.insert(label, left);
             }
             self.vertices.insert(v, nv);
         }

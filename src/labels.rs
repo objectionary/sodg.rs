@@ -4,6 +4,7 @@
 //! Interning of edge labels into compact numeric identifiers.
 
 use rustc_hash::FxHashMap;
+use serde::{Deserialize, Serialize};
 
 use crate::Label;
 
@@ -28,7 +29,7 @@ pub type LabelId = u32;
 /// assert_eq!(id, interner.intern(Label::Alpha(7)));
 /// assert_eq!(Some(Label::Alpha(7)), interner.resolve(id));
 /// ```
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct LabelInterner {
     ids: FxHashMap<Label, LabelId>,
     labels: Vec<Label>,
@@ -62,8 +63,15 @@ impl LabelInterner {
     /// was never handed out by [`LabelInterner::intern`].
     #[must_use]
     pub fn resolve(&self, id: LabelId) -> Option<Label> {
+        self.resolve_ref(id).copied()
+    }
+
+    /// Return a reference to the label behind the identifier, or [`None`]
+    /// if the identifier was never handed out by [`LabelInterner::intern`].
+    #[must_use]
+    pub fn resolve_ref(&self, id: LabelId) -> Option<&Label> {
         let index = usize::try_from(id).ok()?.checked_sub(1)?;
-        self.labels.get(index).copied()
+        self.labels.get(index)
     }
 
     /// Return how many distinct labels are interned.

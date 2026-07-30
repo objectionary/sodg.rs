@@ -20,10 +20,9 @@ impl<const N: usize> Debug for Sodg<N> {
             if vtx.branch == 0 {
                 continue;
             }
-            let mut attrs = vtx
-                .edges
-                .iter()
-                .map(|e| format!("\n\t{} ➞ ν{}", e.0, e.1))
+            let mut attrs = self
+                .kids(v)
+                .map(|(a, to)| format!("\n\t{a} ➞ ν{to}"))
                 .collect::<Vec<String>>();
             if vtx.persistence != Persistence::Empty {
                 attrs.push(format!("{}", vtx.data));
@@ -59,11 +58,7 @@ impl<const N: usize> Sodg<N> {
             .vertices
             .get(v)
             .with_context(|| format!("Can't find ν{v}"))?;
-        let list: Vec<String> = vtx
-            .edges
-            .iter()
-            .map(|e| format!("{}", e.0.clone()))
-            .collect();
+        let list: Vec<String> = self.kids(v).map(|(a, _)| format!("{a}")).collect();
         Ok(format!(
             "ν{v}⟦{}{}⟧",
             if vtx.persistence == Persistence::Empty {

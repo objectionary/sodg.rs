@@ -49,28 +49,35 @@ impl<const N: usize> Sodg<N> {
             let before: Vec<usize> = todo.drain().collect();
             for v in before {
                 done.insert(v);
-                for e in &self.vertices.get(v).unwrap().edges {
-                    if done.contains(e.1) {
+                for (a, to) in self.kids(v) {
+                    if done.contains(to) {
                         continue;
                     }
-                    if !p(v, *e.1, *e.0) {
+                    if !p(v, *to, *a) {
                         continue;
                     }
-                    done.insert(*e.1);
-                    todo.insert(*e.1);
+                    done.insert(*to);
+                    todo.insert(*to);
                 }
             }
         }
         let mut ng = Self::empty(self.vertices.capacity());
-        for (v1, vtx) in self.vertices.iter().filter(|(v, _)| done.contains(v)) {
-            if done.contains(&v1) {
-                ng.add(v1);
-            }
-            for (k, v2) in &vtx.edges {
-                if done.contains(v2) {
-                    ng.add(*v2);
-                    ng.bind(v1, *v2, *k);
-                }
+        let kept: Vec<usize> = self
+            .vertices
+            .iter()
+            .map(|(v1, _)| v1)
+            .filter(|v1| done.contains(v1))
+            .collect();
+        for v1 in kept {
+            ng.add(v1);
+            let edges: Vec<(Label, usize)> = self
+                .kids(v1)
+                .filter(|(_, v2)| done.contains(*v2))
+                .map(|(k, v2)| (*k, *v2))
+                .collect();
+            for (k, v2) in edges {
+                ng.add(v2);
+                ng.bind(v1, v2, k);
             }
         }
         trace!(

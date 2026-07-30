@@ -37,8 +37,16 @@ impl<const N: usize> Sodg<N> {
             vertex
                 .edges
                 .iter()
+                .map(|(label, target)| {
+                    (
+                        *self
+                            .labels
+                            .resolve_ref(*label)
+                            .expect("Edge label was never interned"),
+                        *target,
+                    )
+                })
                 .sorted()
-                .map(|(label, target)| (*label, *target))
                 .collect::<Vec<_>>()
         };
         for (label, target) in edges {
