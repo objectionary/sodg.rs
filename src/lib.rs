@@ -39,6 +39,7 @@ mod find;
 mod hex;
 mod inspect;
 mod label;
+mod labels;
 mod merge;
 mod misc;
 mod next;
@@ -47,6 +48,8 @@ mod script;
 mod serialization;
 mod slice;
 mod xml;
+
+pub use crate::labels::{LabelId, LabelInterner};
 
 const HEX_SIZE: usize = 8;
 const MAX_BRANCHES: usize = 16;
