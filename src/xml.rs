@@ -57,10 +57,10 @@ impl<const N: usize> Sodg<N> {
         {
             let mut v_node = XMLElement::new("v");
             v_node.add_attribute("id", v.to_string().as_str());
-            for e in vtx.edges.iter().sorted_by_key(|e| e.0) {
+            for (a, to) in self.kids(v).sorted_by_key(|e| e.0) {
                 let mut e_node = XMLElement::new("e");
-                e_node.add_attribute("a", e.0.to_string().as_str());
-                e_node.add_attribute("to", e.1.to_string().as_str());
+                e_node.add_attribute("a", a.to_string().as_str());
+                e_node.add_attribute("to", to.to_string().as_str());
                 v_node.add_child(e_node)?;
             }
             if vtx.persistence != Persistence::Empty {

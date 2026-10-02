@@ -49,6 +49,10 @@ tempfile = "3.23.0"
 name = "bench"
 harness = false
 
+[[bench]]
+name = "edge_index"
+harness = false
+
 [lints.clippy]
 all = "warn"
 pedantic = "warn"

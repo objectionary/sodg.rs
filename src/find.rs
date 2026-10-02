@@ -97,10 +97,7 @@ impl<const N: usize> Sodg<N> {
                 if vtx.branch == 0 {
                     bail!("Can't find ν{current}");
                 }
-                vtx.edges
-                    .iter()
-                    .find(|(edge_label, _)| **edge_label == label)
-                    .map(|(_, to)| *to)
+                self.labels.get(label).and_then(|id| vtx.edges.get(id))
             };
             if let Some(next) = target {
                 self.ensure_vertex_alive(next)?;
