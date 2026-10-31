@@ -6,7 +6,7 @@ use std::collections::{HashMap, HashSet};
 use anyhow::{Context, Result, bail};
 use log::debug;
 
-use crate::{Label, Persistence, Sodg};
+use crate::{Label, LabelId, Persistence, Sodg};
 
 impl<const N: usize> Sodg<N> {
     /// Merge another graph into the current one.
@@ -129,13 +129,22 @@ impl<const N: usize> Sodg<N> {
 
     fn join(&mut self, left: usize, right: usize) {
         for v in self.keys() {
-            let mut nv = self.vertices.get(v).unwrap().clone();
-            for e in &self.vertices.get_mut(v).unwrap().edges {
-                if *e.1 == right {
-                    nv.edges.insert(*e.0, left);
-                }
+            let repointed: Vec<LabelId> = self
+                .vertices
+                .get(v)
+                .unwrap()
+                .edges
+                .iter()
+                .filter(|&(_, to)| *to == right)
+                .map(|(label, _)| label)
+                .collect();
+            if repointed.is_empty() {
+                continue;
             }
-            self.vertices.insert(v, nv);
+            let vtx = self.vertices.get_mut(v).unwrap();
+            for label in repointed {
+                vtx.edges.insert(label, left);
+            }
         }
         let kids = self
             .kids(right)
@@ -226,6 +235,35 @@ mod tests {
         // assert_eq!(3, g.kid(0, "c").unwrap());
         // assert_eq!(1, g.kid(3, "d").unwrap());
         // assert_eq!(5, g.kid(1, "e").unwrap());
+    }
+
+    #[test]
+    fn points_no_edge_at_a_vertex_that_a_join_removed() {
+        let mut g: Sodg<16> = Sodg::empty(256);
+        g.add(0);
+        g.add(1);
+        g.bind(0, 1, Label::from_str("a").unwrap());
+        g.add(2);
+        g.bind(1, 2, Label::from_str("b").unwrap());
+        let mut extra = Sodg::empty(256);
+        extra.add(0);
+        extra.add(4);
+        extra.bind(0, 4, Label::from_str("c").unwrap());
+        extra.add(3);
+        extra.bind(0, 3, Label::from_str("a").unwrap());
+        extra.bind(4, 3, Label::from_str("d").unwrap());
+        extra.add(5);
+        extra.bind(3, 5, Label::from_str("e").unwrap());
+        g.merge(&extra, 0, 0).unwrap();
+        let live: HashSet<usize> = g.keys().into_iter().collect();
+        for v in g.keys() {
+            for (a, to) in g.kids(v) {
+                assert!(
+                    live.contains(to),
+                    "ν{v}.{a} still points at ν{to}, which a join has removed"
+                );
+            }
+        }
     }
 
     #[test]

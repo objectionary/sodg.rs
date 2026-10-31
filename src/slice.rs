@@ -5,8 +5,9 @@ use std::collections::HashSet;
 
 use anyhow::Result;
 use log::trace;
+use rustc_hash::FxHashMap;
 
-use crate::{Label, Sodg};
+use crate::{Label, LabelId, Sodg};
 
 impl<const N: usize> Sodg<N> {
     /// Take a slice of the graph, keeping only the vertex specified
@@ -49,28 +50,47 @@ impl<const N: usize> Sodg<N> {
             let before: Vec<usize> = todo.drain().collect();
             for v in before {
                 done.insert(v);
-                for e in &self.vertices.get(v).unwrap().edges {
-                    if done.contains(e.1) {
+                for (a, to) in self.kids(v) {
+                    if done.contains(to) {
                         continue;
                     }
-                    if !p(v, *e.1, *e.0) {
+                    if !p(v, *to, *a) {
                         continue;
                     }
-                    done.insert(*e.1);
-                    todo.insert(*e.1);
+                    done.insert(*to);
+                    todo.insert(*to);
                 }
             }
         }
         let mut ng = Self::empty(self.vertices.capacity());
-        for (v1, vtx) in self.vertices.iter().filter(|(v, _)| done.contains(v)) {
-            if done.contains(&v1) {
-                ng.add(v1);
-            }
-            for (k, v2) in &vtx.edges {
-                if done.contains(v2) {
-                    ng.add(*v2);
-                    ng.bind(v1, *v2, *k);
-                }
+        let mut remapped: FxHashMap<LabelId, LabelId> = FxHashMap::default();
+        let kept: Vec<usize> = self
+            .vertices
+            .iter()
+            .map(|(v1, _)| v1)
+            .filter(|v1| done.contains(v1))
+            .collect();
+        for v1 in kept {
+            ng.add(v1);
+            let edges: Vec<(LabelId, usize)> = self
+                .vertices
+                .get(v1)
+                .unwrap()
+                .edges
+                .iter()
+                .filter(|&(_, v2)| done.contains(v2))
+                .map(|(k, v2)| (k, *v2))
+                .collect();
+            for (k, v2) in edges {
+                let id = *remapped.entry(k).or_insert_with(|| {
+                    let a = self
+                        .labels
+                        .resolve(k)
+                        .expect("Edge label was never interned");
+                    ng.labels.intern(a)
+                });
+                ng.add(v2);
+                ng.bind_interned(v1, v2, id);
             }
         }
         trace!(
@@ -85,6 +105,8 @@ impl<const N: usize> Sodg<N> {
 #[cfg(test)]
 mod tests {
     use std::str::FromStr as _;
+
+    use tempfile::TempDir;
 
     use super::*;
 
@@ -110,6 +132,32 @@ mod tests {
         g.bind(1, 2, Label::from_str("bar").unwrap());
         let slice = g.slice_some(1, |_v, _to, _a| false).unwrap();
         assert_eq!(1, slice.len());
+    }
+
+    #[test]
+    fn keeps_every_label_of_the_slice_resolvable() {
+        let mut g: Sodg<16> = Sodg::empty(256);
+        for v in 0..=3 {
+            g.add(v);
+        }
+        let foo = Label::from_str("foo").unwrap();
+        let bar = Label::from_str("bar").unwrap();
+        let baz = Label::from_str("baz").unwrap();
+        g.bind(3, 0, baz);
+        g.bind(0, 1, foo);
+        g.bind(1, 2, bar);
+        g.bind(2, 0, foo);
+        let slice = g.slice(0).unwrap();
+        assert_eq!(Some(1), slice.kid(0, foo));
+        assert_eq!(Some(2), slice.kid(1, bar));
+        assert_eq!(Some(0), slice.kid(2, foo));
+        let names: Vec<String> = slice.kids(0).map(|(a, _)| a.to_string()).collect();
+        assert_eq!(vec!["foo".to_string()], names);
+        let tmp = TempDir::new().unwrap();
+        let file = tmp.path().join("slice.sodg");
+        slice.save(file.as_path()).unwrap();
+        Sodg::<16>::load(file.as_path())
+            .expect("the slice carries an identifier its own interner can't resolve");
     }
 
     #[test]
