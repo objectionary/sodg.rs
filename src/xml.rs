@@ -50,11 +50,7 @@ impl<const N: usize> Sodg<N> {
             .encoding("UTF-8".into())
             .build();
         let mut root = XMLElement::new("sodg");
-        for (v, vtx) in self
-            .vertices
-            .iter()
-            .sorted_by_key(|(v, _)| <usize>::clone(v))
-        {
+        for (v, vtx) in self.vertices.iter().sorted_by_key(|(v, _)| *v) {
             let mut v_node = XMLElement::new("v");
             v_node.add_attribute("id", v.to_string().as_str());
             for e in vtx.edges.iter().sorted_by_key(|e| e.0) {
