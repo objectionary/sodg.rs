@@ -923,7 +923,7 @@ mod tests {
         let b = &a[2..];
         assert_eq!(&[0xAB, 0xD8], b);
         let b = &a[4..];
-        assert!(b.is_empty());
+        assert_eq!(b, []);
     }
 
     #[test]

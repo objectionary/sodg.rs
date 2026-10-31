@@ -149,7 +149,7 @@ impl Script {
             bail!("Can't parse data '{s}': odd number of hexadecimal digits");
         }
         let mut bytes = Vec::with_capacity(cleaned.len() / 2);
-        for (chunk_index, chunk) in cleaned.as_bytes().chunks_exact(2).enumerate() {
+        for (chunk_index, chunk) in cleaned.as_bytes().as_chunks::<2>().0.iter().enumerate() {
             let byte = Self::parse_hex_pair(chunk).with_context(|| {
                 let pos = chunk_index * 2;
                 format!("Can't parse data '{s}' at position {pos}")
