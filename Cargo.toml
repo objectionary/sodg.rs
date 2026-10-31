@@ -13,9 +13,6 @@ homepage = "https://github.com/objectionary/sodg"
 keywords = ["graph", "oop"]
 categories = ["data-structures", "memory-management"]
 
-[features]
-gc = []
-
 [dependencies]
 anyhow = "1.0.100"
 bincode = { version = "2.0.1", features = ["serde"] }
