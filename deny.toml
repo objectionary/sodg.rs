@@ -1,0 +1,35 @@
+# SPDX-FileCopyrightText: Copyright (c) 2022-2026 Objectionary.com
+# SPDX-License-Identifier: MIT
+
+[graph]
+all-features = true
+
+[advisories]
+git-fetch-with-cli = true
+ignore = [
+  # Bincode is unmaintained upstream and has no patched release; replacing it
+  # in src/serialization.rs is a separate task.
+  { id = "RUSTSEC-2025-0141", reason = "no upgrade path available" },
+  # Unsoundness in emap, reported at yegor256/emap#168, is still open and no
+  # fixed version is published.
+  { id = "RUSTSEC-2026-0128", reason = "no fixed version published" },
+]
+
+[licenses]
+confidence-threshold = 0.92
+allow = [
+  "Apache-2.0",
+  "MIT",
+  "MPL-2.0",
+  "Unicode-3.0",
+  "Unlicense",
+  "Zlib",
+]
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
