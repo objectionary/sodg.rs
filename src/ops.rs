@@ -6,7 +6,7 @@ use anyhow::Context as _;
 use log::trace;
 
 use crate::{BRANCH_NONE, BRANCH_STATIC, Persistence, Sodg};
-use crate::{Hex, Label};
+use crate::{Hex, Label, LabelId};
 
 impl<const N: usize> Sodg<N> {
     /// Add a new vertex `v1` to itself.
@@ -59,12 +59,31 @@ impl<const N: usize> Sodg<N> {
     /// The label `a` can't be empty. If it is empty, an `Err` will be returned.
     ///
     /// If alerts trigger any error, the error will be returned here.
+    ///
+    /// If the graph already holds [`u32::MAX`] distinct labels and `a` is not
+    /// one of them, it will panic: an identifier can't be handed out.
     #[inline]
     pub fn bind(&mut self, v1: usize, v2: usize, a: Label) {
+        let label = self.labels.intern(a);
+        self.bind_interned(v1, v2, label);
+    }
+
+    /// Make an edge whose label this graph has already interned.
+    ///
+    /// This is the body of [`Sodg::bind`], for callers that hold an identifier
+    /// and would otherwise resolve it into a [`Label`] only to have it hashed
+    /// straight back.
+    ///
+    /// # Panics
+    ///
+    /// If either vertex is absent, or if the identifier was never handed out
+    /// by the interner of this very graph.
+    #[inline]
+    pub(crate) fn bind_interned(&mut self, v1: usize, v2: usize, label: LabelId) {
         let mut ours = self.vertices.get(v1).unwrap().branch;
         let theirs = self.vertices.get(v2).unwrap().branch;
         let vtx1 = self.vertices.get_mut(v1).unwrap();
-        vtx1.edges.insert(a, v2);
+        vtx1.edges.insert(label, v2);
         if ours == BRANCH_STATIC {
             if theirs == BRANCH_STATIC {
                 for b in self.branches.iter_mut() {
@@ -93,7 +112,9 @@ impl<const N: usize> Sodg<N> {
             "#bind: edge added ν{}(b={}).{} → ν{}(b={})",
             v1,
             self.vertices.get(v1).unwrap().branch,
-            a,
+            self.labels
+                .resolve_ref(label)
+                .expect("Edge label was never interned"),
             v2,
             self.vertices.get(v2).unwrap().branch,
         );
@@ -229,6 +250,13 @@ impl<const N: usize> Sodg<N> {
     /// # Panics
     ///
     /// If vertex `v1` is absent, `Err` will be returned.
+    ///
+    /// If an edge of the vertex carries a label identifier that this graph
+    /// never interned, it will panic. Every identifier that [`Sodg::bind`]
+    /// writes comes from the interner of the same graph, and [`Sodg::load`]
+    /// checks the identifiers of a decoded graph before returning it, so this
+    /// is reachable only by deserializing a [`Sodg`] by hand, around
+    /// [`Sodg::load`].
     #[inline]
     pub fn kids(&self, v: usize) -> impl Iterator<Item = (&Label, &usize)> + '_ {
         self.vertices
@@ -237,6 +265,14 @@ impl<const N: usize> Sodg<N> {
             .unwrap()
             .edges
             .iter()
+            .map(move |(label, to)| {
+                (
+                    self.labels
+                        .resolve_ref(label)
+                        .expect("Edge label was never interned"),
+                    to,
+                )
+            })
     }
 
     /// Find a kid of a vertex, by its edge name, and return the ID of the vertex found.
@@ -260,12 +296,8 @@ impl<const N: usize> Sodg<N> {
     #[must_use]
     #[inline]
     pub fn kid(&self, v: usize, a: Label) -> Option<usize> {
-        for e in &self.vertices.get(v).unwrap().edges {
-            if *e.0 == a {
-                return Some(*e.1);
-            }
-        }
-        None
+        let label = self.labels.get(a)?;
+        self.vertices.get(v).unwrap().edges.get(label)
     }
 }
 
@@ -488,5 +520,60 @@ mod tests {
         let mut g: Sodg<16> = Sodg::empty(256);
         g.add(0);
         g.add(0);
+    }
+
+    #[test]
+    fn binds_more_edges_than_the_flat_index_holds() {
+        let mut g: Sodg<2> = Sodg::empty(256);
+        g.add(0);
+        for i in 1..=8 {
+            g.add(i);
+            g.bind(0, i, Label::Alpha(i));
+        }
+        assert_eq!(8, g.kids(0).count());
+        for i in 1..=8 {
+            assert_eq!(Some(i), g.kid(0, Label::Alpha(i)));
+        }
+    }
+
+    #[test]
+    fn binds_more_edges_than_a_branch_holds_vertices() {
+        let mut g: Sodg<16> = Sodg::empty(4);
+        g.add(0);
+        g.add(1);
+        for i in 1..=64 {
+            g.bind(0, 1, Label::Alpha(i));
+        }
+        assert_eq!(64, g.kids(0).count());
+        for i in 1..=64 {
+            assert_eq!(Some(1), g.kid(0, Label::Alpha(i)));
+        }
+        assert_eq!(2, g.len());
+    }
+
+    #[test]
+    fn overwrites_an_edge_of_a_grown_vertex() {
+        let mut g: Sodg<2> = Sodg::empty(256);
+        g.add(0);
+        for i in 1..=8 {
+            g.add(i);
+            g.bind(0, i, Label::Alpha(i));
+        }
+        g.bind(0, 8, Label::Alpha(1));
+        assert_eq!(8, g.kids(0).count());
+        assert_eq!(Some(8), g.kid(0, Label::Alpha(1)));
+    }
+
+    #[test]
+    fn keeps_labels_of_different_vertices_apart() {
+        let mut g: Sodg<16> = Sodg::empty(256);
+        g.add(0);
+        g.add(1);
+        g.add(2);
+        g.bind(0, 1, Label::from_str("foo").unwrap());
+        g.bind(1, 2, Label::from_str("bar").unwrap());
+        assert_eq!(Some(1), g.kid(0, Label::from_str("foo").unwrap()));
+        assert_eq!(None, g.kid(0, Label::from_str("bar").unwrap()));
+        assert_eq!(Some(2), g.kid(1, Label::from_str("bar").unwrap()));
     }
 }
