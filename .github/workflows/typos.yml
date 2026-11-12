@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: Copyright (c) 2022-2025 Objectionary.com
+# SPDX-FileCopyrightText: Copyright (c) 2022-2026 Objectionary.com
 # SPDX-License-Identifier: MIT
 ---
 # yamllint disable rule:line-length
@@ -10,10 +10,13 @@ name: typos
   pull_request:
     branches:
       - master
+concurrency:
+  group: typos-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   typos:
     timeout-minutes: 15
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
-      - uses: actions/checkout@v5
-      - uses: crate-ci/typos@v1.36.2
+      - uses: actions/checkout@v7
+      - uses: crate-ci/typos@v1.52.0

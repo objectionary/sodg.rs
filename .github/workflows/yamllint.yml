@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: Copyright (c) 2022-2025 Objectionary.com
+# SPDX-FileCopyrightText: Copyright (c) 2022-2026 Objectionary.com
 # SPDX-License-Identifier: MIT
 ---
 # yamllint disable rule:line-length
@@ -7,15 +7,24 @@ name: yamllint
   push:
     branches:
       - master
+    paths:
+      - '**.yml'
+      - '**.yaml'
   pull_request:
     branches:
       - master
+    paths:
+      - '**.yml'
+      - '**.yaml'
+concurrency:
+  group: yamllint-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   yamllint:
     timeout-minutes: 15
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: ibiqlik/action-yamllint@v3
         with:
           config-file: .yamllint.yml

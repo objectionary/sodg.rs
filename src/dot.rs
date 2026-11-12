@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: Copyright (c) 2022-2025 Objectionary.com
+// SPDX-FileCopyrightText: Copyright (c) 2022-2026 Objectionary.com
 // SPDX-License-Identifier: MIT
 
 use itertools::Itertools;
@@ -44,11 +44,7 @@ digraph {
   edge [fontname=\"Arial\"];"
                 .to_string(),
         );
-        for (v, vtx) in self
-            .vertices
-            .iter()
-            .sorted_by_key(|(v, _)| <usize>::clone(v))
-        {
+        for (v, vtx) in self.vertices.iter().sorted_by_key(|(v, _)| *v) {
             lines.push(format!(
                 "  v{v}[shape=circle,label=\"ν{v}\"{}]; {}",
                 if vtx.persistence == Persistence::Empty {
@@ -68,24 +64,14 @@ digraph {
                     e.1,
                     e.0,
                     match e.0 {
-                        Label::Greek(g) => {
-                            if *g == 'ρ' || *g == 'σ' {
-                                ",color=gray,fontcolor=gray"
-                            } else {
-                                ""
-                            }
+                        Label::Greek(g) if *g == 'ρ' || *g == 'σ' => {
+                            ",color=gray,fontcolor=gray"
                         }
-                        _ => {
-                            ""
-                        }
+                        _ => "",
                     },
                     match e.0 {
-                        Label::Greek(g) => {
-                            if *g == 'π' { ",style=dashed" } else { "" }
-                        }
-                        _ => {
-                            ""
-                        }
+                        Label::Greek(g) if *g == 'π' => ",style=dashed",
+                        _ => "",
                     }
                 ));
             }

@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: Copyright (c) 2022-2025 Objectionary.com
+// SPDX-FileCopyrightText: Copyright (c) 2022-2026 Objectionary.com
 // SPDX-License-Identifier: MIT
 
 use std::fmt::{Debug, Display, Formatter};
@@ -806,7 +806,7 @@ mod tests {
     #[test]
     fn concatenates_bytes_with_long_vector_without_padding() {
         let bytes = Hex::from_slice(&[0xAB, 0xCD]);
-        let vector = Hex::from_vec((1..=16).map(|value| value as u8).collect());
+        let vector = Hex::from_vec((1u8..=16u8).collect());
         let result = bytes.concat(&vector);
         let mut expected = Vec::with_capacity(bytes.len() + vector.len());
         expected.extend_from_slice(bytes.bytes());
@@ -923,7 +923,7 @@ mod tests {
         let b = &a[2..];
         assert_eq!(&[0xAB, 0xD8], b);
         let b = &a[4..];
-        assert!(b.is_empty());
+        assert_eq!(b, []);
     }
 
     #[test]
