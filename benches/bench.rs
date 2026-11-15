@@ -49,7 +49,7 @@ fn bench_bind_edges(c: &mut Criterion) {
     let mut group = c.benchmark_group("bind_edges");
     for &n in &sizes {
         let edges = n.saturating_sub(1);
-        let skipped = edges / 16;
+        let skipped = edges.div_ceil(16);
         let ops = edges.saturating_sub(skipped);
         group.throughput(Throughput::Elements(ops as u64));
         group.bench_with_input(BenchmarkId::from_parameter(n), &n, |b, &n| {
