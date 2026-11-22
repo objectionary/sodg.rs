@@ -305,11 +305,21 @@ impl Hex {
     /// ```
     /// use sodg::Hex;
     /// let d = Hex::from_vec([0x01].to_vec());
-    /// assert_eq!(true, d.to_bool());
+    /// assert_eq!(true, d.to_bool().unwrap());
     /// ```
-    #[must_use]
-    pub fn to_bool(&self) -> bool {
-        self.bytes()[0] == 0x01
+    ///
+    /// # Errors
+    ///
+    /// If the data is not exactly one byte long, an error will be returned.
+    pub fn to_bool(&self) -> Result<bool> {
+        let bytes = self.bytes();
+        if bytes.len() != 1 {
+            anyhow::bail!(
+                "There must be exactly one byte to make BOOL (just {} found)",
+                bytes.len()
+            );
+        }
+        Ok(bytes[0] == 0x01)
     }
 
     /// Turn it into `i64`.
@@ -674,8 +684,18 @@ mod tests {
     fn simple_bool() {
         let b = true;
         let d = Hex::from(b);
-        assert_eq!(b, d.to_bool());
+        assert_eq!(b, d.to_bool().unwrap());
         assert_eq!("01", d.print());
+    }
+
+    #[test]
+    fn bool_from_empty_fails() {
+        assert!(Hex::empty().to_bool().is_err());
+    }
+
+    #[test]
+    fn bool_from_many_bytes_fails() {
+        assert!(Hex::from_vec(vec![0x01, 0xFF]).to_bool().is_err());
     }
 
     #[test]
