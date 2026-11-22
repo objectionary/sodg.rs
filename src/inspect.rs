@@ -17,25 +17,24 @@ impl<const N: usize> Sodg<N> {
     /// # Errors
     ///
     /// If it's impossible to inspect, an error will be returned.
-    pub fn inspect(&self, v: usize) -> Result<String> {
+    pub fn inspect(&self, c: usize) -> Result<String> {
         let mut seen = HashSet::new();
         Ok(format!(
-            "ν{}\n{}",
-            v,
-            self.inspect_v(v, &mut seen)?.join("\n"),
+            "c{}\n{}",
+            c,
+            self.inspect_c(c, &mut seen)?.join("\n"),
         ))
     }
 
-    fn inspect_v(&self, v: usize, seen: &mut HashSet<usize>) -> Result<Vec<String>> {
+    fn inspect_c(&self, v: usize, seen: &mut HashSet<usize>) -> Result<Vec<String>> {
         seen.insert(v);
         let mut lines = vec![];
         let edges = {
-            let vertex = self
-                .vertices
+            let cell = self
+                .cells
                 .get(v)
-                .with_context(|| format!("Can't find ν{v}"))?;
-            vertex
-                .edges
+                .with_context(|| format!("Can't find c{v}"))?;
+            cell.edges
                 .iter()
                 .sorted()
                 .map(|(label, target)| (*label, *target))
@@ -44,11 +43,11 @@ impl<const N: usize> Sodg<N> {
         for (label, target) in edges {
             let skip = seen.contains(&target);
             let suffix = if skip { "…" } else { "" };
-            lines.push(format!("  .{label} ➞ ν{target}{suffix}"));
+            lines.push(format!("  .{label} ➞ c{target}{suffix}"));
             if skip {
                 continue;
             }
-            let inspected = self.inspect_v(target, seen)?;
+            let inspected = self.inspect_c(target, seen)?;
             for nested in inspected {
                 lines.push(format!("  {nested}"));
             }
@@ -66,21 +65,21 @@ mod tests {
     #[test]
     fn inspects_simple_object() {
         let mut g: Sodg<16> = Sodg::empty(256);
-        g.add(0);
-        g.put(0, &Hex::from_str_bytes("hello"));
-        g.add(1);
+        g.formation(0, &[]);
+        g.delta(0, &Hex::from_str_bytes("hello"));
+        g.formation(1, &[]);
         let txt = g.inspect(0).unwrap();
-        g.bind(0, 1, Label::Alpha(0));
+        g.put(0, Label::Alpha(0), 1);
         assert_ne!(String::new(), txt);
     }
 
     #[test]
-    fn inspect_errors_if_child_vertex_missing() {
+    fn inspect_errors_if_child_cell_missing() {
         let mut g: Sodg<16> = Sodg::empty(256);
-        g.add(0);
-        g.add(1);
-        g.bind(0, 1, Label::Alpha(0));
-        g.vertices.remove(1);
+        g.formation(0, &[]);
+        g.formation(1, &[]);
+        g.put(0, Label::Alpha(0), 1);
+        g.cells.remove(1);
         let result = g.inspect(0);
         assert!(result.is_err());
     }

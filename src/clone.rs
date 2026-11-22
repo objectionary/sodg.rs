@@ -7,10 +7,10 @@ impl<const N: usize> Clone for Sodg<N> {
     /// Make a clone of the graph.
     fn clone(&self) -> Self {
         Self {
-            vertices: self.vertices.clone(),
+            cells: self.cells.clone(),
             branches: self.branches.clone(),
             stores: self.stores.clone(),
-            next_v: self.next_v,
+            next_c: self.next_c,
         }
     }
 }
@@ -23,9 +23,9 @@ mod tests {
     #[test]
     fn makes_a_clone() {
         let mut g: Sodg<16> = Sodg::empty(256);
-        g.add(1);
-        g.add(42);
-        g.bind(1, 42, Label::Alpha(0));
+        g.formation(1, &[]);
+        g.formation(42, &[]);
+        g.put(1, Label::Alpha(0), 42);
         let c = g.clone();
         assert_eq!(2, c.len());
     }

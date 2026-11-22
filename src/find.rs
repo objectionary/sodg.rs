@@ -11,18 +11,18 @@ use crate::{Label, Sodg};
 const MAX_FIND_RECURSION: usize = 128;
 
 impl<const N: usize> Sodg<N> {
-    /// Locate a vertex starting from `start` by following the dot-separated `locator`.
+    /// Locate a cell starting from `start` by following the dot-separated `locator`.
     ///
     /// The path segments are interpreted as edge labels. When a segment can't be
     /// resolved directly, the provided `resolver` is invoked with the current
-    /// vertex identifier and the missing attribute. The resolver must return an
+    /// cell identifier and the missing attribute. The resolver must return an
     /// alternative locator that will be followed recursively. Returning an empty
-    /// locator keeps the traversal at the current vertex. Locators starting with
-    /// `"ν"` are treated as absolute vertex identifiers.
+    /// locator keeps the traversal at the current cell. Locators starting with
+    /// `"ν"` are treated as absolute cell identifiers.
     ///
     /// # Errors
     ///
-    /// * Returns an error if any of the vertices along the path is absent.
+    /// * Returns an error if any of the cells along the path is absent.
     /// * Returns an error if a label segment can't be parsed into a [`Label`].
     /// * Propagates any error raised by the resolver closure.
     /// * Returns an error if recursion depth exceeds the internal recursion limit.
@@ -35,9 +35,9 @@ impl<const N: usize> Sodg<N> {
     /// use sodg::{Label, Sodg};
     ///
     /// let mut g: Sodg<16> = Sodg::empty(256);
-    /// g.add(0);
-    /// g.add(1);
-    /// g.bind(0, 1, Label::from_str("foo").unwrap());
+    /// g.formation(0, &[]);
+    /// g.formation(1, &[]);
+    /// g.put(0, Label::from_str("foo").unwrap(), 1);
     /// let found = g
     ///     .find_with_closure(0, "foo", |_v, _a| Ok(String::new()))
     ///     .unwrap();
@@ -67,11 +67,11 @@ impl<const N: usize> Sodg<N> {
     {
         if depth > MAX_FIND_RECURSION {
             bail!(
-                "Recursion depth limit ({MAX_FIND_RECURSION}) exceeded while resolving '{locator}' from ν{start}"
+                "Recursion depth limit ({MAX_FIND_RECURSION}) exceeded while resolving '{locator}' from c{start}"
             );
         }
-        self.ensure_vertex_alive(start)?;
-        let mut vertex = start;
+        self.ensure_cell_alive(start)?;
+        let mut cell = start;
         let mut segments: VecDeque<String> = locator
             .split('.')
             .filter(|segment| !segment.is_empty())
@@ -81,53 +81,53 @@ impl<const N: usize> Sodg<N> {
             if let Some(rest) = segment.strip_prefix('ν') {
                 let id = rest
                     .parse::<usize>()
-                    .with_context(|| format!("Can't parse vertex identifier from '{segment}'"))?;
-                self.ensure_vertex_alive(id)?;
-                vertex = id;
+                    .with_context(|| format!("Can't parse cell identifier from '{segment}'"))?;
+                self.ensure_cell_alive(id)?;
+                cell = id;
                 continue;
             }
-            let current = vertex;
+            let current = cell;
             let label = Label::from_str(segment.as_str())
                 .with_context(|| format!("Can't parse label '{segment}'"))?;
             let target = {
-                let vtx = self
-                    .vertices
+                let cell = self
+                    .cells
                     .get(current)
-                    .with_context(|| format!("Can't find ν{current}"))?;
-                if vtx.branch == 0 {
-                    bail!("Can't find ν{current}");
+                    .with_context(|| format!("Can't find c{current}"))?;
+                if cell.branch == 0 {
+                    bail!("Can't find c{current}");
                 }
-                vtx.edges
+                cell.edges
                     .iter()
                     .find(|(edge_label, _)| **edge_label == label)
                     .map(|(_, to)| *to)
             };
             if let Some(next) = target {
-                self.ensure_vertex_alive(next)?;
-                vertex = next;
+                self.ensure_cell_alive(next)?;
+                cell = next;
                 continue;
             }
             let alternative = resolver(current, segment.as_str()).with_context(|| {
-                format!("Resolver failed to provide alternative for ν{current}.{segment}")
+                format!("Resolver failed to provide alternative for c{current}.{segment}")
             })?;
-            vertex = self
+            cell = self
                 .find_with_closure_recursive(current, alternative.as_str(), resolver, depth + 1)
                 .with_context(|| {
                     format!(
-                        "Alternative path '{alternative}' from ν{current}.{segment} did not resolve"
+                        "Alternative path '{alternative}' from c{current}.{segment} did not resolve"
                     )
                 })?;
         }
-        Ok(vertex)
+        Ok(cell)
     }
 
-    fn ensure_vertex_alive(&self, id: usize) -> Result<()> {
-        let vertex = self
-            .vertices
+    fn ensure_cell_alive(&self, id: usize) -> Result<()> {
+        let cell = self
+            .cells
             .get(id)
-            .with_context(|| format!("Can't find ν{id}"))?;
-        if vertex.branch == 0 {
-            bail!("Can't find ν{id}");
+            .with_context(|| format!("Can't find c{id}"))?;
+        if cell.branch == 0 {
+            bail!("Can't find c{id}");
         }
         Ok(())
     }
@@ -140,13 +140,13 @@ mod tests {
     use crate::Label;
 
     #[test]
-    fn finds_vertex_via_resolver() {
+    fn finds_cell_via_resolver() {
         let mut g: Sodg<16> = Sodg::empty(256);
-        g.add(1);
-        g.add(2);
-        g.add(3);
-        g.bind(1, 2, Label::from_str("first").unwrap());
-        g.bind(2, 3, Label::from_str("alt").unwrap());
+        g.formation(1, &[]);
+        g.formation(2, &[]);
+        g.formation(3, &[]);
+        g.put(1, Label::from_str("first").unwrap(), 2);
+        g.put(2, Label::from_str("alt").unwrap(), 3);
         let found = g
             .find_with_closure(1, "first.second", |v, a| {
                 if v == 2 && a == "second" {
@@ -162,7 +162,7 @@ mod tests {
     #[test]
     fn returns_start_for_empty_locator() {
         let mut g: Sodg<16> = Sodg::empty(256);
-        g.add(5);
+        g.formation(5, &[]);
         let found = g
             .find_with_closure(5, "", |_v, _a| Ok(String::new()))
             .unwrap();
@@ -172,11 +172,11 @@ mod tests {
     #[test]
     fn redirects_through_sub_locator() {
         let mut g: Sodg<16> = Sodg::empty(256);
-        g.add(1);
-        g.add(2);
-        g.bind(1, 2, Label::from_str("xyz").unwrap());
-        g.add(3);
-        g.bind(2, 3, Label::from_str("x").unwrap());
+        g.formation(1, &[]);
+        g.formation(2, &[]);
+        g.put(1, Label::from_str("xyz").unwrap(), 2);
+        g.formation(3, &[]);
+        g.put(2, Label::from_str("x").unwrap(), 3);
         let found = g
             .find_with_closure(1, "a.x", |v, a| {
                 if v == 1 && a == "a" {
@@ -190,11 +190,11 @@ mod tests {
     }
 
     #[test]
-    fn jumps_to_absolute_vertex() {
+    fn jumps_to_absolute_cell() {
         let mut g: Sodg<16> = Sodg::empty(256);
-        g.add(0);
-        g.add(1);
-        g.bind(0, 1, Label::from_str("foo").unwrap());
+        g.formation(0, &[]);
+        g.formation(1, &[]);
+        g.put(0, Label::from_str("foo").unwrap(), 1);
         let found = g
             .find_with_closure(0, "bar", |_v, _a| Ok("ν1".to_string()))
             .unwrap();
@@ -204,7 +204,7 @@ mod tests {
     #[test]
     fn propagates_resolver_error() {
         let mut g: Sodg<16> = Sodg::empty(256);
-        g.add(0);
+        g.formation(0, &[]);
         let result = g.find_with_closure(0, "bar", |_v, _a| anyhow::bail!("no alternative"));
         assert!(result.is_err());
         let err = result.err().unwrap();
@@ -217,7 +217,7 @@ mod tests {
     #[test]
     fn guards_against_recursion_overflow() {
         let mut g: Sodg<16> = Sodg::empty(256);
-        g.add(0);
+        g.formation(0, &[]);
         let result = g.find_with_closure(0, "foo", |_v, _a| Ok("foo".to_string()));
         assert!(result.is_err());
         let err = result.err().unwrap();
@@ -228,19 +228,19 @@ mod tests {
     }
 
     #[test]
-    fn errors_when_start_vertex_is_missing() {
+    fn errors_when_start_cell_is_missing() {
         let g: Sodg<16> = Sodg::empty(256);
         let result = g.find_with_closure(7, "foo", |_v, _a| Ok(String::new()));
         assert!(result.is_err());
         let err = result.err().unwrap();
-        let mentions_missing = err.chain().any(|cause| cause.to_string().contains("ν7"));
+        let mentions_missing = err.chain().any(|cause| cause.to_string().contains("c7"));
         assert!(mentions_missing, "{}", err);
     }
 
     #[test]
-    fn errors_when_nu_segment_is_not_numeric() {
+    fn errors_when_absolute_segment_is_not_numeric() {
         let mut g: Sodg<16> = Sodg::empty(256);
-        g.add(0);
+        g.formation(0, &[]);
         let result = g.find_with_closure(0, "νabc", |_v, _a| Ok(String::new()));
         assert!(result.is_err());
         let err = result.err().unwrap();
@@ -249,20 +249,20 @@ mod tests {
     }
 
     #[test]
-    fn errors_when_absolute_jump_targets_missing_vertex() {
+    fn errors_when_absolute_jump_targets_missing_cell() {
         let mut g: Sodg<16> = Sodg::empty(256);
-        g.add(0);
+        g.formation(0, &[]);
         let result = g.find_with_closure(0, "ν9", |_v, _a| Ok(String::new()));
         assert!(result.is_err());
         let err = result.err().unwrap();
-        let mentions_target = err.chain().any(|cause| cause.to_string().contains("ν9"));
+        let mentions_target = err.chain().any(|cause| cause.to_string().contains("c9"));
         assert!(mentions_target, "{}", err);
     }
 
     #[test]
     fn errors_when_label_segment_is_too_long() {
         let mut g: Sodg<16> = Sodg::empty(256);
-        g.add(0);
+        g.formation(0, &[]);
         let too_long = "abcdefghi";
         let result = g.find_with_closure(0, too_long, |_v, _a| Ok(String::new()));
         assert!(result.is_err());

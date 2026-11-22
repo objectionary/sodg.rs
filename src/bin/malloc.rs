@@ -33,28 +33,28 @@ impl Book for Discounted {
 #[must_use]
 pub fn on_graph(total: usize) -> (i64, Duration) {
     let mut g: Sodg<16> = Sodg::empty(total * 4);
-    g.add(0);
+    g.formation(0, &[]);
     let mut sum = 0;
     let start = Instant::now();
-    let forty_two = Hex::from(42);
+    let forty_two = Hex::from(42_i64);
     for _ in 0..total {
-        let v1 = 1;
-        g.add(v1);
-        let v2 = v1 + 1;
-        g.add(v2);
-        g.bind(v1, v2, Label::Alpha(0));
-        g.bind(v2, v1, Label::Greek('ρ'));
-        let v3 = v2 + 1;
-        g.add(v3);
-        g.bind(v2, v3, Label::Greek('Δ'));
-        g.put(v3, &forty_two);
-        let v4 = v3 + 1;
-        g.add(v4);
-        g.bind(v4, v1, Label::Greek('φ'));
-        assert!(g.kid(v4, Label::Alpha(0)).is_none());
-        g.kid(v4, Label::Greek('φ')).unwrap();
-        g.kid(v1, Label::Alpha(0)).unwrap();
-        let k = g.kid(v2, Label::Greek('Δ')).unwrap();
+        let c1 = 1;
+        g.formation(c1, &[]);
+        let c2 = c1 + 1;
+        g.formation(c2, &[]);
+        g.put(c1, Label::Alpha(0), c2);
+        g.put(c2, Label::Greek('ρ'), c1);
+        let c3 = c2 + 1;
+        g.formation(c3, &[]);
+        g.put(c2, Label::Greek('Δ'), c3);
+        g.delta(c3, &forty_two);
+        let c4 = c3 + 1;
+        g.formation(c4, &[]);
+        g.put(c4, Label::Greek('φ'), c1);
+        assert!(g.kid(c4, Label::Alpha(0)).is_none());
+        g.kid(c4, Label::Greek('φ')).unwrap();
+        g.kid(c1, Label::Alpha(0)).unwrap();
+        let k = g.kid(c2, Label::Greek('Δ')).unwrap();
         sum += g.data(k).unwrap().to_i64().unwrap() / 2;
     }
     (std::hint::black_box(sum), start.elapsed())

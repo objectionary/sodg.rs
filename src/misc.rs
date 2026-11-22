@@ -4,7 +4,7 @@
 use crate::Sodg;
 
 impl<const N: usize> Sodg<N> {
-    /// Get total number of vertices in the graph.
+    /// Get total number of cells in the graph.
     #[must_use]
     pub fn len(&self) -> usize {
         self.keys().len()
@@ -16,12 +16,12 @@ impl<const N: usize> Sodg<N> {
         self.len() == 0
     }
 
-    /// Get keys of all vertices alive?
+    /// Get keys of all cells alive?
     #[must_use]
     pub fn keys(&self) -> Vec<usize> {
-        self.vertices
+        self.cells
             .iter()
-            .filter(|(_, vtx)| vtx.branch != 0)
+            .filter(|(_, cell)| cell.branch != 0)
             .map(|(v, _)| v)
             .collect::<Vec<usize>>()
     }
@@ -32,7 +32,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn counts_vertices() {
+    fn counts_cells() {
         let g: Sodg<16> = Sodg::empty(256);
         assert_eq!(0, g.len());
     }

@@ -5,7 +5,7 @@ use anyhow::Result;
 use itertools::Itertools as _;
 use xml_builder::{XMLBuilder, XMLElement, XMLVersion};
 
-use crate::{Persistence, Sodg};
+use crate::{Kind, Persistence, Sodg};
 
 impl<const N: usize> Sodg<N> {
     /// Make XML graph.
@@ -17,11 +17,11 @@ impl<const N: usize> Sodg<N> {
     /// use sodg::{Hex, Label};
     /// use sodg::Sodg;
     /// let mut g : Sodg<16> = Sodg::empty(256);
-    /// g.add(0);
-    /// g.put(0, &Hex::from_str_bytes("hello"));
-    /// g.add(1);
-    /// g.bind(0, 1, Label::from_str("foo").unwrap());
-    /// g.bind(0, 1, Label::from_str("bar").unwrap());
+    /// g.formation(0, &[]);
+    /// g.delta(0, &Hex::from_str_bytes("hello"));
+    /// g.formation(1, &[]);
+    /// g.put(0, Label::from_str("foo").unwrap(), 1);
+    /// g.put(0, Label::from_str("bar").unwrap(), 1);
     /// let xml = g.to_xml().unwrap();
     /// println!("{}", xml);
     /// ```
@@ -31,12 +31,12 @@ impl<const N: usize> Sodg<N> {
     /// ```xml
     /// <?xml version="1.1" encoding="UTF-8"?>
     /// <sodg>
-    ///     <v id="0">
+    ///     <cell id="0" kind="formation">
     ///         <e a="foo" to="1" />
     ///         <e a="bar" to="1" />
     ///         <data>68 65 6C 6C 6F</data>
-    ///     </v>
-    ///     <v id="1" />
+    ///     </cell>
+    ///     <cell id="1" kind="formation" />
     /// </sodg>
     /// ```
     ///
@@ -50,21 +50,38 @@ impl<const N: usize> Sodg<N> {
             .encoding("UTF-8".into())
             .build();
         let mut root = XMLElement::new("sodg");
-        for (v, vtx) in self.vertices.iter().sorted_by_key(|(v, _)| *v) {
-            let mut v_node = XMLElement::new("v");
-            v_node.add_attribute("id", v.to_string().as_str());
-            for e in vtx.edges.iter().sorted_by_key(|e| e.0) {
+        for (v, cell) in self.cells.iter().sorted_by_key(|(v, _)| *v) {
+            let mut c_node = XMLElement::new("cell");
+            c_node.add_attribute("id", v.to_string().as_str());
+            match cell.kind {
+                Kind::Void => {}
+                Kind::Formation => c_node.add_attribute("kind", "formation"),
+                Kind::Dispatch(a) => {
+                    c_node.add_attribute("kind", "dispatch");
+                    c_node.add_attribute("attr", a.to_string().as_str());
+                }
+                Kind::Application(a) => {
+                    c_node.add_attribute("kind", "application");
+                    c_node.add_attribute("attr", a.to_string().as_str());
+                }
+            }
+            for e in cell.edges.iter().sorted_by_key(|e| e.0) {
                 let mut e_node = XMLElement::new("e");
                 e_node.add_attribute("a", e.0.to_string().as_str());
                 e_node.add_attribute("to", e.1.to_string().as_str());
-                v_node.add_child(e_node)?;
+                c_node.add_child(e_node)?;
             }
-            if vtx.persistence != Persistence::Empty {
+            if cell.persistence != Persistence::Empty {
                 let mut data_node = XMLElement::new("data");
-                data_node.add_text(vtx.data.print().replace('-', " "))?;
-                v_node.add_child(data_node)?;
+                data_node.add_text(cell.data.print().replace('-', " "))?;
+                c_node.add_child(data_node)?;
             }
-            root.add_child(v_node)?;
+            if let Some(name) = &cell.lambda {
+                let mut lambda_node = XMLElement::new("lambda");
+                lambda_node.add_text(name.clone())?;
+                c_node.add_child(lambda_node)?;
+            }
+            root.add_child(c_node)?;
         }
         xml.set_root_element(root);
         let mut writer: Vec<u8> = Vec::new();
@@ -85,22 +102,52 @@ mod tests {
     #[test]
     fn prints_simple_graph() {
         let mut g: Sodg<16> = Sodg::empty(256);
-        g.add(0);
-        g.put(0, &Hex::from_str_bytes("hello"));
-        g.add(1);
-        g.bind(0, 1, Label::from_str("foo").unwrap());
+        g.formation(0, &[]);
+        g.delta(0, &Hex::from_str_bytes("hello"));
+        g.formation(1, &[]);
+        g.put(0, Label::from_str("foo").unwrap(), 1);
         let xml = g.to_xml().unwrap();
         let parser = sxd_document::parser::parse(xml.as_str()).unwrap();
         let doc = parser.as_document();
         assert_eq!(
             "foo",
-            evaluate_xpath(&doc, "/sodg/v[@id=0]/e[1]/@a")
+            evaluate_xpath(&doc, "/sodg/cell[@id=0]/e[1]/@a")
                 .unwrap()
                 .string(),
         );
         assert_eq!(
             "68 65 6C 6C 6F",
-            evaluate_xpath(&doc, "/sodg/v[@id=0]/data")
+            evaluate_xpath(&doc, "/sodg/cell[@id=0]/data")
+                .unwrap()
+                .string(),
+        );
+    }
+
+    #[test]
+    fn prints_kinds_and_lambda() {
+        let mut g: Sodg<16> = Sodg::empty(256);
+        let x = Label::from_str("x").unwrap();
+        g.formation(0, &[x]);
+        g.lambda(0, "L_foo");
+        g.dispatch(1, 0, x);
+        let xml = g.to_xml().unwrap();
+        let parser = sxd_document::parser::parse(xml.as_str()).unwrap();
+        let doc = parser.as_document();
+        assert_eq!(
+            "formation",
+            evaluate_xpath(&doc, "/sodg/cell[@id=0]/@kind")
+                .unwrap()
+                .string(),
+        );
+        assert_eq!(
+            "L_foo",
+            evaluate_xpath(&doc, "/sodg/cell[@id=0]/lambda")
+                .unwrap()
+                .string(),
+        );
+        assert_eq!(
+            "x",
+            evaluate_xpath(&doc, "/sodg/cell[@id=1][@kind='dispatch']/@attr")
                 .unwrap()
                 .string(),
         );

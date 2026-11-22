@@ -15,11 +15,11 @@ impl<const N: usize> Sodg<N> {
     /// use sodg::{Hex, Label};
     /// use sodg::Sodg;
     /// let mut g : Sodg<16> = Sodg::empty(256);
-    /// g.add(0);
-    /// g.put(0, &Hex::from_str_bytes("hello"));
-    /// g.add(1);
-    /// g.bind(0, 1, Label::from_str("foo").unwrap());
-    /// g.bind(0, 1, Label::from_str("bar").unwrap());
+    /// g.formation(0, &[]);
+    /// g.delta(0, &Hex::from_str_bytes("hello"));
+    /// g.formation(1, &[]);
+    /// g.put(0, Label::from_str("foo").unwrap(), 1);
+    /// g.put(0, Label::from_str("bar").unwrap(), 1);
     /// let dot = g.to_dot();
     /// println!("{}", dot);
     /// ```
@@ -28,10 +28,10 @@ impl<const N: usize> Sodg<N> {
     ///
     /// ```text
     /// digraph {
-    ///   v0[shape=circle,label="ν0"];
-    ///   v0 -> v1 [label="bar"];
-    ///   v0 -> v1 [label="foo"];
-    ///   v1[shape=circle,label="ν1"];
+    ///   c0[shape=circle,label="c0"];
+    ///   c0 -> c1 [label="bar"];
+    ///   c0 -> c1 [label="foo"];
+    ///   c1[shape=circle,label="c1"];
     /// }
     /// ```
     #[must_use]
@@ -44,23 +44,23 @@ digraph {
   edge [fontname=\"Arial\"];"
                 .to_string(),
         );
-        for (v, vtx) in self.vertices.iter().sorted_by_key(|(v, _)| *v) {
+        for (v, cell) in self.cells.iter().sorted_by_key(|(v, _)| *v) {
             lines.push(format!(
-                "  v{v}[shape=circle,label=\"ν{v}\"{}]; {}",
-                if vtx.persistence == Persistence::Empty {
+                "  c{v}[shape=circle,label=\"c{v}\"{}]; {}",
+                if cell.persistence == Persistence::Empty {
                     ""
                 } else {
                     ",color=\"#f96900\""
                 },
-                if vtx.persistence == Persistence::Empty {
+                if cell.persistence == Persistence::Empty {
                     String::new()
                 } else {
-                    format!("/* {} */", vtx.data)
+                    format!("/* {} */", cell.data)
                 },
             ));
-            for e in vtx.edges.iter().sorted_by_key(|e| e.0) {
+            for e in cell.edges.iter().sorted_by_key(|e| e.0) {
                 lines.push(format!(
-                    "  v{v} -> v{} [label=\"{}\"{}{}];",
+                    "  c{v} -> c{} [label=\"{}\"{}{}];",
                     e.1,
                     e.0,
                     match e.0 {
@@ -87,10 +87,10 @@ use crate::Hex;
 #[test]
 fn simple_graph_to_dot() {
     let mut g: Sodg<16> = Sodg::empty(256);
-    g.add(0);
-    g.put(0, &Hex::from_str_bytes("hello"));
-    g.add(1);
-    g.bind(0, 1, Label::Alpha(0));
+    g.formation(0, &[]);
+    g.delta(0, &Hex::from_str_bytes("hello"));
+    g.formation(1, &[]);
+    g.put(0, Label::Alpha(0), 1);
     let dot = g.to_dot();
-    assert!(dot.contains("shape=circle,label=\"ν0\""));
+    assert!(dot.contains("shape=circle,label=\"c0\""));
 }

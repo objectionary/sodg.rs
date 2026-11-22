@@ -5,7 +5,7 @@ use std::fmt::{self, Debug, Display, Formatter};
 
 use anyhow::{Context as _, Result};
 
-use crate::{Persistence, Sodg};
+use crate::{Kind, Persistence, Sodg};
 
 impl<const N: usize> Display for Sodg<N> {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
@@ -16,19 +16,28 @@ impl<const N: usize> Display for Sodg<N> {
 impl<const N: usize> Debug for Sodg<N> {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         let mut lines = vec![];
-        for (v, vtx) in self.vertices.iter() {
-            if vtx.branch == 0 {
+        for (v, cell) in self.cells.iter() {
+            if cell.branch == 0 {
                 continue;
             }
-            let mut attrs = vtx
+            let mut attrs = cell
                 .edges
                 .iter()
-                .map(|e| format!("\n\t{} ➞ ν{}", e.0, e.1))
+                .map(|e| format!("\n\t{} ➞ c{}", e.0, e.1))
                 .collect::<Vec<String>>();
-            if vtx.persistence != Persistence::Empty {
-                attrs.push(format!("{}", vtx.data));
+            if cell.persistence != Persistence::Empty {
+                attrs.push(format!("{}", cell.data));
             }
-            lines.push(format!("ν{v} -> ⟦{}⟧", attrs.join(", ")));
+            if let Some(name) = &cell.lambda {
+                attrs.push(format!("λ ⤍ {name}"));
+            }
+            let kind = match cell.kind {
+                Kind::Void => String::new(),
+                Kind::Formation => "F ".to_string(),
+                Kind::Dispatch(a) => format!("D.{a} "),
+                Kind::Application(a) => format!("A({a}) "),
+            };
+            lines.push(format!("c{v} -> {kind}⟦{}⟧", attrs.join(", ")));
         }
         for (b, members) in self.branches.iter() {
             if members.is_empty() {
@@ -38,7 +47,7 @@ impl<const N: usize> Debug for Sodg<N> {
                 "b{b}: {{{}}}",
                 members
                     .into_iter()
-                    .map(|v| format!("ν{v}"))
+                    .map(|v| format!("c{v}"))
                     .collect::<Vec<String>>()
                     .join(", ")
             ));
@@ -48,25 +57,25 @@ impl<const N: usize> Debug for Sodg<N> {
 }
 
 impl<const N: usize> Sodg<N> {
-    /// Print a single vertex to a string, which can be used for
+    /// Print a single cell to a string, which can be used for
     /// logging and debugging.
     ///
     /// # Errors
     ///
-    /// If the vertex is absent, an error may be returned.
-    pub fn v_print(&self, v: usize) -> Result<String> {
-        let vtx = &self
-            .vertices
-            .get(v)
-            .with_context(|| format!("Can't find ν{v}"))?;
-        let list: Vec<String> = vtx
+    /// If the cell is absent, an error may be returned.
+    pub fn c_print(&self, c: usize) -> Result<String> {
+        let cell = &self
+            .cells
+            .get(c)
+            .with_context(|| format!("Can't find c{c}"))?;
+        let list: Vec<String> = cell
             .edges
             .iter()
             .map(|e| format!("{}", e.0.clone()))
             .collect();
         Ok(format!(
-            "ν{v}⟦{}{}⟧",
-            if vtx.persistence == Persistence::Empty {
+            "c{c}⟦{}{}⟧",
+            if cell.persistence == Persistence::Empty {
                 ""
             } else {
                 "Δ, "
@@ -79,15 +88,15 @@ impl<const N: usize> Sodg<N> {
 #[test]
 fn prints_itself() {
     let mut g: Sodg<16> = Sodg::empty(256);
-    g.add(0);
-    g.add(1);
+    g.formation(0, &[]);
+    g.formation(1, &[]);
     assert_ne!("", format!("{g:?}"));
 }
 
 #[test]
 fn displays_itself() {
     let mut g: Sodg<16> = Sodg::empty(256);
-    g.add(0);
-    g.add(1);
+    g.formation(0, &[]);
+    g.formation(1, &[]);
     assert_ne!("", format!("{g}"));
 }
