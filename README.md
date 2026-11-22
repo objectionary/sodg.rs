@@ -14,44 +14,72 @@
 This Rust library implements a Surging Object DiGraph (SODG) for
 [reo](https://github.com/objectionary/reo) virtual machine for
 [EO](https://www.eolang.org) programs. The graph is "surging" because
-it automatically behind the scene deletes vertices and edges from itself,
-which is also known as "garbage collection" mechanism. A vertex gets deleted
-right after the data it contains is read _and_ no other vertices
+it automatically behind the scene deletes cells and edges from itself,
+which is also known as "garbage collection" mechanism. A cell gets deleted
+right after the data it contains is read _and_ no other cells
 transitively point to it.
 
-Here is how you can create a di-graph:
+Each cell of the graph stands for a 𝜑-expression.
+There are six methods that build the graph, one per command
+printed by [`phino sodg`](https://github.com/objectionary/phino):
+
+| Command | Method | What it does |
+| --- | --- | --- |
+| `F o attr0 attr1 ...` | `formation()` | makes `o` a formation |
+| `D o base attr` | `dispatch()` | makes `o` the dispatch `base.attr` |
+| `A o proto attr arg` | `application()` | makes `o` the `proto( attr ↦ arg )` |
+| `P o attr kid` | `put()` | puts `kid` to the attribute `attr` of `o` |
+| `Δ o data` | `delta()` | sets the Δ-asset of `o` |
+| `λ o name` | `lambda()` | sets the λ-asset of `o` |
+
+A dispatch cell has a single edge `π` to its base and keeps the
+attribute in its `Kind::Dispatch`.
+An application cell has an edge `π` to its proto, an edge `attr`
+to its argument, and keeps the attribute in its `Kind::Application`.
+
+Here is how you can create a graph:
 
 ```rust
-use sodg::Sodg;
-use sodg::Hex;
-let mut g = Sodg::empty(256);
-g.add(0); // add a vertex no.0
-g.add(1); // add a vertex no.1
-g.bind(0, 1, "foo"); // connect v0 to v1 with label "foo"
-g.put(1, &Hex::from_str_bytes("Hello, world!")); // attach data to v1
+use sodg::{Hex, Label, Sodg};
+let mut g: Sodg<16> = Sodg::empty(256);
+let x = Label::from_str("x").unwrap();
+g.formation(0, &[x]); // make a formation ⟦ x ↦ ? ⟧ in cell no.0
+g.formation(1, &[]); // make an empty formation in cell no.1
+g.delta(1, &Hex::from(42_i64)); // attach data to cell no.1
+g.put(0, x, 1); // put cell no.1 to the attribute "x" of cell no.0
+g.dispatch(2, 0, x); // make cell no.2 for the dispatch of "x" from cell no.0
+g.lambda(0, "L_foo"); // set the λ-asset of cell no.0
 ```
 
-Then, you can find a vertex by the label of an edge departing
-from another vertex:
+The same graph can be deployed from the output of `phino sodg`:
 
 ```rust
-let id = g.kid(0, "foo");
+use sodg::Script;
+Script::from_str(
+  "F c0 x\nF c1\nΔ c1 00-00-00-00-00-00-00-2A\nP c0 x c1\nD c2 c0 x\nλ c0 L_foo"
+).deploy_to(&mut g)?;
+```
+
+Then, you can find a cell by the label of an edge departing
+from another cell:
+
+```rust
+let id = g.kid(0, x).unwrap();
 assert_eq!(1, id);
 ```
 
-Then, you can find all kids of a vertex:
+Then, you can find all kids of a cell:
 
 ```rust
-let kids: Vec<(String, String, usize)> = g.kids(0);
-assert_eq!("foo", kids[0].0);
-assert_eq!("bar", kids[0].1);
-assert_eq!(1, kids[0].2);
+let kids: Vec<(&Label, &usize)> = g.kids(0).collect();
+assert_eq!("x", kids[0].0.to_string());
+assert_eq!(1, *kids[0].1);
 ```
 
-Then, you can read the data of a vertex:
+Then, you can read the data of a cell:
 
 ```rust
-let hex: Hex = g.data(1);
+let hex: Hex = g.data(1).unwrap();
 let num: i64 = hex.to_i64()?;
 assert_eq!(42, num);
 ```

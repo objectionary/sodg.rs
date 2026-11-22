@@ -27,7 +27,7 @@ impl<const N: usize> Sodg<N> {
         let size = bytes.len();
         fs::write(path, bytes).with_context(|| format!("Can't write to {}", path.display()))?;
         trace!(
-            "Serialized {} vertices ({} bytes) to {} in {:?}",
+            "Serialized {} cells ({} bytes) to {} in {:?}",
             self.len(),
             size,
             path.display(),
@@ -51,7 +51,7 @@ impl<const N: usize> Sodg<N> {
             .with_context(|| format!("Can't deserialize from {}", path.display()))?
             .0;
         trace!(
-            "Deserialized {} vertices ({} bytes) from {} in {:?}",
+            "Deserialized {} cells ({} bytes) from {} in {:?}",
             sodg.len(),
             size,
             path.display(),
@@ -73,9 +73,9 @@ mod tests {
     #[test]
     fn can_save() {
         let mut g: Sodg<16> = Sodg::empty(256);
-        g.add(0);
-        g.add(1);
-        g.bind(0, 1, Label::from_str("foo").unwrap());
+        g.formation(0, &[]);
+        g.formation(1, &[]);
+        g.put(0, Label::from_str("foo").unwrap(), 1);
         let tmp = TempDir::new().unwrap();
         let file = tmp.path().join("foo.sodg");
         g.save(file.as_path()).unwrap();
@@ -85,8 +85,8 @@ mod tests {
     #[test]
     fn saves_and_loads() {
         let mut g: Sodg<1> = Sodg::empty(100);
-        g.add(0);
-        g.put(0, &Hex::from_str_bytes("hello"));
+        g.formation(0, &[]);
+        g.delta(0, &Hex::from_str_bytes("hello"));
         let tmp = TempDir::new().unwrap();
         let file = tmp.path().join("foo.sodg");
         g.save(file.as_path()).unwrap();

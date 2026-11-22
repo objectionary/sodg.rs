@@ -9,7 +9,7 @@
 /// command `cargo bench` will run all benchmarks in the project.)
 ///
 /// If you want to run a single benchmark, you can use the command
-/// `cargo bench -- bench_name`, for example `cargo bench -- add_vertices`.
+/// `cargo bench -- bench_name`, for example `cargo bench -- formations`.
 use std::hint::black_box;
 
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
@@ -19,20 +19,20 @@ use sodg::{Hex, Label, Sodg};
 fn setup_graph(n: usize) -> Sodg<16> {
     let mut graph = Sodg::<16>::empty(n);
     for i in 0..n {
-        graph.add(i);
+        graph.formation(i, &[]);
     }
     graph
 }
 
-fn bench_add_vertices(c: &mut Criterion) {
+fn bench_formations(c: &mut Criterion) {
     let sizes = [10, 100, 1000, 10_000];
-    let mut group = c.benchmark_group("add_vertices");
+    let mut group = c.benchmark_group("formations");
     for &size in &sizes {
         group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, &size| {
             let mut graph = black_box(Sodg::<16>::empty(black_box(size)));
             b.iter(|| {
                 for i in 0..size {
-                    black_box(graph.add(black_box(i)));
+                    black_box(graph.formation(black_box(i), black_box(&[])));
                 }
                 black_box(&mut graph);
             });
@@ -41,19 +41,19 @@ fn bench_add_vertices(c: &mut Criterion) {
     group.finish();
 }
 
-fn bench_bind_edges(c: &mut Criterion) {
+fn bench_put(c: &mut Criterion) {
     let sizes = [10, 100, 200];
-    let mut group = c.benchmark_group("bind_edges");
+    let mut group = c.benchmark_group("put");
     for &size in &sizes {
         group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, &size| {
             let mut graph = setup_graph(size);
             b.iter(|| {
                 for i in 0..size - 1 {
                     if i % 16 != 0 {
-                        black_box(graph.bind(
+                        black_box(graph.put(
                             black_box(i),
-                            black_box(i + 1),
                             black_box(Label::Alpha(0)),
+                            black_box(i + 1),
                         ));
                     }
                 }
@@ -64,16 +64,16 @@ fn bench_bind_edges(c: &mut Criterion) {
     group.finish();
 }
 
-fn bench_put(c: &mut Criterion) {
+fn bench_delta(c: &mut Criterion) {
     let sizes = [10, 100, 1000, 10_000];
-    let mut group = c.benchmark_group("put");
+    let mut group = c.benchmark_group("delta");
     for &size in &sizes {
         group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, &size| {
             let mut graph = setup_graph(size);
             b.iter(|| {
                 for i in 0..size {
                     black_box(
-                        graph.put(black_box(i), black_box(&Hex::from_str_bytes("some string"))),
+                        graph.delta(black_box(i), black_box(&Hex::from_str_bytes("some string"))),
                     );
                 }
                 black_box(&mut graph);
@@ -83,16 +83,16 @@ fn bench_put(c: &mut Criterion) {
     group.finish();
 }
 
-fn bench_put_and_data(c: &mut Criterion) {
+fn bench_delta_and_data(c: &mut Criterion) {
     let sizes = [10, 100, 1000, 10_000];
-    let mut group = c.benchmark_group("put_and_data");
+    let mut group = c.benchmark_group("delta_and_data");
     for &size in &sizes {
         group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, &size| {
             let mut graph = setup_graph(size);
             b.iter(|| {
                 for i in 0..size {
                     black_box(
-                        graph.put(black_box(i), black_box(&Hex::from_str_bytes("some string"))),
+                        graph.delta(black_box(i), black_box(&Hex::from_str_bytes("some string"))),
                     );
                     _ = black_box(graph.data(black_box(i)));
                 }
@@ -106,6 +106,6 @@ fn bench_put_and_data(c: &mut Criterion) {
 criterion_group!(
     name = benches;
     config = Criterion::default().sample_size(20);
-    targets = bench_add_vertices, bench_bind_edges, bench_put, bench_put_and_data,
+    targets = bench_formations, bench_put, bench_delta, bench_delta_and_data,
 );
 criterion_main!(benches);

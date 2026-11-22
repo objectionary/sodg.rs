@@ -3,29 +3,32 @@
 
 use emap::Map;
 
-use crate::{Hex, MAX_BRANCHES, Persistence, Sodg, Vertex};
+use crate::{Cell, Hex, Kind, MAX_BRANCHES, Persistence, Sodg};
 
 impl<const N: usize> Sodg<N> {
-    /// Make an empty [`Sodg`], with no vertices and no edges.
+    /// Make an empty [`Sodg`], with no cells and no edges.
     ///
     /// # Panics
     ///
-    /// May panic if vertices provided to alerts are absent (should never happen, though).
+    /// May panic if cells provided to alerts are absent (should never happen, though).
     #[must_use]
     pub fn empty(cap: usize) -> Self {
         let mut g = Self {
-            vertices: Map::with_capacity_some(
+            cells: Map::with_capacity_some(
                 cap,
-                Vertex {
+                Cell {
                     branch: 0,
+                    kind: Kind::Void,
+                    attrs: Vec::new(),
                     data: Hex::empty(),
                     persistence: Persistence::Empty,
+                    lambda: None,
                     edges: micromap::Map::new(),
                 },
             ),
             stores: Map::with_capacity_some(MAX_BRANCHES, 0),
             branches: Map::with_capacity_some(MAX_BRANCHES, microstack::Stack::new()),
-            next_v: 0,
+            next_c: 0,
         };
         g.branches.insert(0, microstack::Stack::from_vec(vec![0]));
         g.branches.insert(1, microstack::Stack::from_vec(vec![0]));
@@ -36,6 +39,6 @@ impl<const N: usize> Sodg<N> {
 #[test]
 fn makes_an_empty_sodg() {
     let mut g: Sodg<16> = Sodg::empty(256);
-    g.add(0);
+    g.formation(0, &[]);
     assert_eq!(1, g.len());
 }

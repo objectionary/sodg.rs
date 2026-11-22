@@ -33,24 +33,24 @@ impl Book for Discounted {
 #[must_use]
 pub fn on_graph(total: usize) -> (i64, Duration) {
     let mut g: Sodg<16> = Sodg::empty(total * 4);
-    g.add(0);
+    g.formation(0, &[]);
     let mut sum = 0;
     let start = Instant::now();
     let forty_two = Hex::from(42);
     for _ in 0..total {
         let v1 = 1;
-        g.add(v1);
+        g.formation(v1, &[]);
         let v2 = v1 + 1;
-        g.add(v2);
-        g.bind(v1, v2, Label::Alpha(0));
-        g.bind(v2, v1, Label::Greek('ρ'));
+        g.formation(v2, &[]);
+        g.put(v1, Label::Alpha(0), v2);
+        g.put(v2, Label::Greek('ρ'), v1);
         let v3 = v2 + 1;
-        g.add(v3);
-        g.bind(v2, v3, Label::Greek('Δ'));
-        g.put(v3, &forty_two);
+        g.formation(v3, &[]);
+        g.put(v2, Label::Greek('Δ'), v3);
+        g.delta(v3, &forty_two);
         let v4 = v3 + 1;
-        g.add(v4);
-        g.bind(v4, v1, Label::Greek('φ'));
+        g.formation(v4, &[]);
+        g.put(v4, Label::Greek('φ'), v1);
         assert!(g.kid(v4, Label::Alpha(0)).is_none());
         g.kid(v4, Label::Greek('φ')).unwrap();
         g.kid(v1, Label::Alpha(0)).unwrap();

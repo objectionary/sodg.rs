@@ -9,7 +9,7 @@ use log::trace;
 use crate::{Label, Sodg};
 
 impl<const N: usize> Sodg<N> {
-    /// Take a slice of the graph, keeping only the vertex specified
+    /// Take a slice of the graph, keeping only the cell specified
     /// by the locator and its kids, recursively found in the entire graph.
     ///
     /// # Errors
@@ -19,14 +19,14 @@ impl<const N: usize> Sodg<N> {
     pub fn slice(&self, v: usize) -> Result<Self> {
         let g: Sodg<N> = self.slice_some(v, |_, _, _| true)?;
         trace!(
-            "#slice: taken {} vertices out of {} at ν{v}",
+            "#slice: taken {} cells out of {} at c{v}",
             g.len(),
             self.len(),
         );
         Ok(g)
     }
 
-    /// Take a slice of the graph, keeping only the vertex specified
+    /// Take a slice of the graph, keeping only the cell specified
     /// by the locator and its kids, recursively found in the entire graph,
     /// but only if the provided predicate agrees with the selection of
     /// the kids.
@@ -49,7 +49,7 @@ impl<const N: usize> Sodg<N> {
             let before: Vec<usize> = todo.drain().collect();
             for v in before {
                 done.insert(v);
-                for e in &self.vertices.get(v).unwrap().edges {
+                for e in &self.cells.get(v).unwrap().edges {
                     if done.contains(e.1) {
                         continue;
                     }
@@ -61,20 +61,22 @@ impl<const N: usize> Sodg<N> {
                 }
             }
         }
-        let mut ng = Self::empty(self.vertices.capacity());
-        for (v1, vtx) in self.vertices.iter().filter(|(v, _)| done.contains(v)) {
-            if done.contains(&v1) {
-                ng.add(v1);
-            }
-            for (k, v2) in &vtx.edges {
+        let mut ng = Self::empty(self.cells.capacity());
+        for (v1, cell) in self.cells.iter().filter(|(v, _)| done.contains(v)) {
+            ng.make(v1);
+            let copy = ng.cells.get_mut(v1).unwrap();
+            copy.kind = cell.kind;
+            copy.attrs.clone_from(&cell.attrs);
+            copy.lambda.clone_from(&cell.lambda);
+            for (k, v2) in &cell.edges {
                 if done.contains(v2) {
-                    ng.add(*v2);
-                    ng.bind(v1, *v2, *k);
+                    ng.make(*v2);
+                    ng.link(v1, *v2, *k);
                 }
             }
         }
         trace!(
-            "#slice_some: taken {} vertices out of {} at ν{v}",
+            "#slice_some: taken {} cells out of {} at c{v}",
             ng.len(),
             self.len(),
         );
@@ -91,35 +93,51 @@ mod tests {
     #[test]
     fn makes_a_slice() {
         let mut g: Sodg<16> = Sodg::empty(256);
-        g.add(0);
-        g.add(1);
-        g.bind(0, 1, Label::from_str("foo").unwrap());
-        g.add(2);
-        g.bind(0, 2, Label::from_str("bar").unwrap());
+        g.formation(0, &[]);
+        g.formation(1, &[]);
+        g.put(0, Label::from_str("foo").unwrap(), 1);
+        g.formation(2, &[]);
+        g.put(0, Label::from_str("bar").unwrap(), 2);
         assert_eq!(1, g.slice(1).unwrap().len());
         assert_eq!(1, g.slice(2).unwrap().len());
     }
 
     #[test]
+    fn keeps_kinds_in_slice() {
+        let mut g: Sodg<16> = Sodg::empty(256);
+        let x = Label::from_str("x").unwrap();
+        g.formation(0, &[x]);
+        g.lambda(0, "L_foo");
+        g.formation(1, &[]);
+        g.put(0, x, 1);
+        g.dispatch(2, 0, x);
+        let slice = g.slice(2).unwrap();
+        assert_eq!(3, slice.len());
+        assert_eq!(crate::Kind::Dispatch(x), slice.kind(2));
+        assert_eq!(&[x], slice.attrs(0));
+        assert_eq!(Some("L_foo"), slice.atom(0));
+    }
+
+    #[test]
     fn makes_a_partial_slice() {
         let mut g: Sodg<16> = Sodg::empty(256);
-        g.add(0);
-        g.add(1);
-        g.bind(0, 1, Label::from_str("foo").unwrap());
-        g.add(2);
-        g.bind(1, 2, Label::from_str("bar").unwrap());
+        g.formation(0, &[]);
+        g.formation(1, &[]);
+        g.put(0, Label::from_str("foo").unwrap(), 1);
+        g.formation(2, &[]);
+        g.put(1, Label::from_str("bar").unwrap(), 2);
         let slice = g.slice_some(1, |_v, _to, _a| false).unwrap();
         assert_eq!(1, slice.len());
     }
 
     #[test]
-    fn skips_some_vertices() {
+    fn skips_some_cells() {
         let mut g: Sodg<16> = Sodg::empty(256);
-        g.add(0);
-        g.add(1);
-        g.bind(0, 1, Label::from_str("foo").unwrap());
-        g.add(2);
-        g.bind(0, 2, Label::from_str("+bar").unwrap());
+        g.formation(0, &[]);
+        g.formation(1, &[]);
+        g.put(0, Label::from_str("foo").unwrap(), 1);
+        g.formation(2, &[]);
+        g.put(0, Label::from_str("+bar").unwrap(), 2);
         let slice = g
             .slice_some(0, |_, _, a| !a.to_string().starts_with('+'))
             .unwrap();

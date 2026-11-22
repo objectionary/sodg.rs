@@ -1,24 +1,46 @@
 // SPDX-FileCopyrightText: Copyright (c) 2022-2026 Objectionary.com
 // SPDX-License-Identifier: MIT
 
-//! This is a memory structure with vertices and edges between them,
+//! This is a memory structure with cells and edges between them,
 //! which we call Surging Object `DiGraph` (SODG), because it expects
-//! modifications comping from a user (through [`Sodg::add`],
-//! [`Sodg::bind`], and [`Sodg::put`]) and then decides itself when
-//! it's time to delete some vertices (something similar to
+//! modifications coming from a user (through [`Sodg::formation`],
+//! [`Sodg::dispatch`], [`Sodg::application`], [`Sodg::put`],
+//! [`Sodg::delta`], and [`Sodg::lambda`]) and then decides itself when
+//! it's time to delete some cells (something similar to
 //! "garbage collection").
 //!
-//! For example, here is how you create a simple
-//! di-graph with two vertices and an edge between them:
+//! Every cell stands for a 𝜑-expression and has a [`Kind`]:
+//!
+//! - `F o attr0 attr1 ...` makes the cell `o` a formation with these
+//!   attributes, see [`Sodg::formation`]. The attributes are kept in the
+//!   cell, see [`Sodg::attrs`], while their values are attached later
+//!   by `P`.
+//! - `D o base attr` makes the cell `o` the dispatch `base.attr`,
+//!   see [`Sodg::dispatch`]. The cell gets the kind [`Kind::Dispatch`]
+//!   with `attr` inside and a single edge `π` pointing to `base`.
+//!   The dispatch is not resolved while the graph is being built.
+//! - `A o proto attr arg` makes the cell `o` the application
+//!   `proto( attr ↦ arg )`, see [`Sodg::application`]. The cell gets the
+//!   kind [`Kind::Application`] with `attr` inside, an edge `π` pointing
+//!   to `proto`, and an edge `attr` pointing to `arg`.
+//! - `P o attr kid` puts `kid` to the attribute `attr` of `o`, making
+//!   an edge `attr` from `o` to `kid`, see [`Sodg::put`].
+//! - `Δ o data` sets the Δ-asset of `o`, see [`Sodg::delta`].
+//! - `λ o name` sets the λ-asset of `o`, see [`Sodg::lambda`].
+//!
+//! For example, here is how you create a formation with a single
+//! attribute `foo`, which is bound to another formation:
 //!
 //! ```
 //! use std::str::FromStr as _;
 //!
 //! use sodg::{Label, Sodg};
 //! let mut sodg: Sodg<16> = Sodg::empty(256);
-//! sodg.add(0);
-//! sodg.add(1);
-//! sodg.bind(0, 1, Label::from_str("foo").unwrap());
+//! let foo = Label::from_str("foo").unwrap();
+//! sodg.formation(0, &[foo]);
+//! sodg.formation(1, &[]);
+//! sodg.put(0, foo, 1);
+//! assert_eq!(1, sodg.kid(0, foo).unwrap());
 //! ```
 
 #![doc(html_root_url = "https://docs.rs/sodg/0.0.0")]
@@ -49,11 +71,18 @@ mod slice;
 mod xml;
 
 const HEX_SIZE: usize = 8;
+// @todo #313:90min A branch can't hold more than `MAX_BRANCH_SIZE` cells,
+//  while the output of `phino sodg` for any real program has many more
+//  cells connected to each other. Deploying such an output with
+//  `Script::deploy_to()` panics with "No more space left in the stack" from
+//  `microstack`. Let's make branches grow, or join them when cells of
+//  two branches get connected, and deploy a script with a few hundred cells
+//  in a test.
 const MAX_BRANCHES: usize = 16;
 const MAX_BRANCH_SIZE: usize = 16;
 
 /// An object-oriented representation of binary data
-/// in hexadecimal format, which can be put into vertices of the graph.
+/// in hexadecimal format, which can be put into cells of the graph.
 ///
 /// You can create it from Rust primitives:
 ///
@@ -77,6 +106,11 @@ pub enum Hex {
 }
 
 /// A label on an edge.
+// @todo #313:60min `Label::Str` can't keep more than eight characters,
+//  while attributes of EO objects may be longer, like `as-number`
+//  (nine characters). Such a line of `phino sodg` output
+//  fails in `Script::deploy_to()`. Let's make labels longer without
+//  losing the `Copy` trait and test it with a long attribute.
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy, Serialize, Deserialize)]
 pub enum Label {
     Greek(char),
@@ -84,40 +118,64 @@ pub enum Label {
     Str([char; 8]),
 }
 
-/// A wrapper of a plain text with graph-modifying instructions.
+/// What a cell of the graph stands for.
+///
+/// A cell that was never made by [`Sodg::formation`], [`Sodg::dispatch`],
+/// or [`Sodg::application`] is [`Kind::Void`].
+#[derive(PartialEq, Eq, Clone, Copy, Debug, Serialize, Deserialize)]
+pub enum Kind {
+    /// Nothing is known about the cell.
+    Void,
+    /// A formation, like `⟦ x ↦ ..., y ↦ ... ⟧`.
+    Formation,
+    /// A dispatch of the attribute, like `base.attr`; the base
+    /// is the kid of the cell at the edge `π`.
+    Dispatch(Label),
+    /// An application with the attribute, like `proto( attr ↦ arg )`;
+    /// the proto is the kid of the cell at the edge `π`, while the
+    /// argument is the kid at the edge `attr`.
+    Application(Label),
+}
+
+/// A wrapper of a plain text with graph-modifying instructions,
+/// as printed by `phino sodg`.
 ///
 /// For example, you can pass the following instructions to it:
 ///
 /// ```text
-/// ADD(0);
-/// ADD($ν1); # adding new vertex
-/// BIND(0, $ν1, foo);
-/// PUT($ν1, d0-bf-D1-80-d0-B8-d0-b2-d0-b5-d1-82);
+/// F c0 foo
+/// F c1 x
+/// F c2
+/// Δ c2 2A-
+/// P c1 x c2
+/// λ c1 L_foo
+/// P c0 foo c1
 /// ```
 ///
-/// In the script you can use "variables", similar to `$ν1` used
-/// in the text above. They will be replaced by autogenerated numbers
-/// during the deployment of this script to a [`Sodg`].
+/// Each line is a command: a letter and its arguments, separated
+/// by spaces. The names of cells, like `c0` above, are replaced by
+/// autogenerated numbers during the deployment of this script to
+/// a [`Sodg`].
 pub struct Script {
     /// The text of it.
     txt: String,
-    /// The vars dynamically discovered.
+    /// The names of cells dynamically discovered.
     vars: HashMap<String, usize>,
 }
 
 /// A struct that represents a Surging Object Di-Graph (SODG).
 ///
-/// You add vertices to it, bind them one to one with edges,
+/// You make cells in it, attach them one to another with edges,
 /// put data into some of them, and read data back, for example:
 ///
 /// ```
 /// use sodg::{Label, Sodg};
 /// let mut sodg: Sodg<16> = Sodg::empty(256);
-/// sodg.add(0);
-/// sodg.add(1);
-/// sodg.bind(0, 1, Label::Alpha(0));
-/// sodg.add(2);
-/// sodg.bind(1, 2, Label::Alpha(1));
+/// sodg.formation(0, &[Label::Alpha(0)]);
+/// sodg.formation(1, &[Label::Alpha(1)]);
+/// sodg.put(0, Label::Alpha(0), 1);
+/// sodg.formation(2, &[]);
+/// sodg.put(1, Label::Alpha(1), 2);
 /// assert_eq!(1, sodg.kids(0).count());
 /// assert_eq!(1, sodg.kids(1).count());
 /// ```
@@ -128,11 +186,11 @@ pub struct Script {
 pub struct Sodg<const N: usize> {
     stores: emap::Map<usize>,
     branches: emap::Map<microstack::Stack<usize, MAX_BRANCH_SIZE>>,
-    vertices: emap::Map<Vertex<N>>,
-    /// This is the next ID of a vertex to be returned by the [`Sodg::next_v`]
+    cells: emap::Map<Cell<N>>,
+    /// This is the next ID of a cell to be returned by the [`Sodg::next_id`]
     /// function.
     #[serde(skip_serializing, skip_deserializing)]
-    next_v: usize,
+    next_c: usize,
 }
 
 #[derive(PartialEq, Serialize, Deserialize, Clone)]
@@ -146,10 +204,13 @@ const BRANCH_NONE: usize = 0;
 const BRANCH_STATIC: usize = 1;
 
 #[derive(Serialize, Deserialize, Clone)]
-struct Vertex<const N: usize> {
+struct Cell<const N: usize> {
     branch: usize,
+    kind: Kind,
+    attrs: Vec<Label>,
     data: Hex,
     persistence: Persistence,
+    lambda: Option<String>,
     edges: micromap::Map<Label, usize, N>,
 }
 
