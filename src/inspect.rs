@@ -17,16 +17,16 @@ impl<const N: usize> Sodg<N> {
     /// # Errors
     ///
     /// If it's impossible to inspect, an error will be returned.
-    pub fn inspect(&self, v: usize) -> Result<String> {
+    pub fn inspect(&self, c: usize) -> Result<String> {
         let mut seen = HashSet::new();
         Ok(format!(
             "c{}\n{}",
-            v,
-            self.inspect_v(v, &mut seen)?.join("\n"),
+            c,
+            self.inspect_c(c, &mut seen)?.join("\n"),
         ))
     }
 
-    fn inspect_v(&self, v: usize, seen: &mut HashSet<usize>) -> Result<Vec<String>> {
+    fn inspect_c(&self, v: usize, seen: &mut HashSet<usize>) -> Result<Vec<String>> {
         seen.insert(v);
         let mut lines = vec![];
         let edges = {
@@ -47,7 +47,7 @@ impl<const N: usize> Sodg<N> {
             if skip {
                 continue;
             }
-            let inspected = self.inspect_v(target, seen)?;
+            let inspected = self.inspect_c(target, seen)?;
             for nested in inspected {
                 lines.push(format!("  {nested}"));
             }

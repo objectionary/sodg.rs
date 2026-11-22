@@ -63,18 +63,18 @@ impl<const N: usize> Sodg<N> {
     /// # Errors
     ///
     /// If the cell is absent, an error may be returned.
-    pub fn c_print(&self, v: usize) -> Result<String> {
+    pub fn c_print(&self, c: usize) -> Result<String> {
         let cell = &self
             .cells
-            .get(v)
-            .with_context(|| format!("Can't find c{v}"))?;
+            .get(c)
+            .with_context(|| format!("Can't find c{c}"))?;
         let list: Vec<String> = cell
             .edges
             .iter()
             .map(|e| format!("{}", e.0.clone()))
             .collect();
         Ok(format!(
-            "c{v}⟦{}{}⟧",
+            "c{c}⟦{}{}⟧",
             if cell.persistence == Persistence::Empty {
                 ""
             } else {

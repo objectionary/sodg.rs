@@ -40,6 +40,7 @@ to its argument, and keeps the attribute in its `Kind::Application`.
 Here is how you can create a graph:
 
 ```rust
+use std::str::FromStr as _;
 use sodg::{Hex, Label, Sodg};
 let mut g: Sodg<16> = Sodg::empty(256);
 let x = Label::from_str("x").unwrap();

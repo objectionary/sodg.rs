@@ -16,10 +16,10 @@ impl<const N: usize> Sodg<N> {
     ///
     /// If impossible to slice, an error will be returned.
     #[allow(clippy::use_self)]
-    pub fn slice(&self, v: usize) -> Result<Self> {
-        let g: Sodg<N> = self.slice_some(v, |_, _, _| true)?;
+    pub fn slice(&self, c: usize) -> Result<Self> {
+        let g: Sodg<N> = self.slice_some(c, |_, _, _| true)?;
         trace!(
-            "#slice: taken {} cells out of {} at c{v}",
+            "#slice: taken {} cells out of {} at c{c}",
             g.len(),
             self.len(),
         );
@@ -38,22 +38,22 @@ impl<const N: usize> Sodg<N> {
     /// # Panics
     ///
     /// If impossible to slice, an error will be returned.
-    pub fn slice_some(&self, v: usize, p: impl Fn(usize, usize, Label) -> bool) -> Result<Self> {
+    pub fn slice_some(&self, c: usize, p: impl Fn(usize, usize, Label) -> bool) -> Result<Self> {
         let mut todo = HashSet::new();
         let mut done = HashSet::new();
-        todo.insert(v);
+        todo.insert(c);
         loop {
             if todo.is_empty() {
                 break;
             }
             let before: Vec<usize> = todo.drain().collect();
-            for v in before {
-                done.insert(v);
-                for e in &self.cells.get(v).unwrap().edges {
+            for c in before {
+                done.insert(c);
+                for e in &self.cells.get(c).unwrap().edges {
                     if done.contains(e.1) {
                         continue;
                     }
-                    if !p(v, *e.1, *e.0) {
+                    if !p(c, *e.1, *e.0) {
                         continue;
                     }
                     done.insert(*e.1);
@@ -62,7 +62,7 @@ impl<const N: usize> Sodg<N> {
             }
         }
         let mut ng = Self::empty(self.cells.capacity());
-        for (v1, cell) in self.cells.iter().filter(|(v, _)| done.contains(v)) {
+        for (v1, cell) in self.cells.iter().filter(|(c, _)| done.contains(c)) {
             ng.make(v1);
             let copy = ng.cells.get_mut(v1).unwrap();
             copy.kind = cell.kind;
@@ -76,7 +76,7 @@ impl<const N: usize> Sodg<N> {
             }
         }
         trace!(
-            "#slice_some: taken {} cells out of {} at c{v}",
+            "#slice_some: taken {} cells out of {} at c{c}",
             ng.len(),
             self.len(),
         );
