@@ -315,6 +315,17 @@ P c0 bar c7
     }
 
     #[test]
+    fn deploys_long_attributes() {
+        let mut g: Sodg<16> = Sodg::empty(256);
+        Script::from_str("F c0 as-number\nF c1\nD c2 c1 as-number\nP c0 as-number c2")
+            .deploy_to(&mut g)
+            .unwrap();
+        assert_eq!(&[label("as-number")], g.attrs(0));
+        assert_eq!(Kind::Dispatch(label("as-number")), g.kind(2));
+        assert_eq!(2, g.kid(0, label("as-number")).unwrap());
+    }
+
+    #[test]
     fn deploys_numeric_cells() {
         let mut g: Sodg<16> = Sodg::empty(256);
         Script::from_str("F 5 x\nF 7\nP 5 x 7")

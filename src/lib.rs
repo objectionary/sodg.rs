@@ -105,17 +105,25 @@ pub enum Hex {
     Bytes([u8; HEX_SIZE], usize),
 }
 
+/// The maximum number of bytes in a [`Label::Str`], in UTF-8.
+const LABEL_SIZE: usize = 32;
+
 /// A label on an edge.
-// @todo #313:60min `Label::Str` can't keep more than eight characters,
-//  while attributes of EO objects may be longer, like `as-number`
-//  (nine characters). Such a line of `phino sodg` output
-//  fails in `Script::deploy_to()`. Let's make labels longer without
-//  losing the `Copy` trait and test it with a long attribute.
+///
+/// A [`Label::Str`] keeps up to 32 bytes of UTF-8 text, padded with zeros,
+/// which is enough for long attributes of EO objects, like `as-number`:
+///
+/// ```
+/// use std::str::FromStr;
+/// use sodg::Label;
+/// let l = Label::from_str("as-number").unwrap();
+/// assert_eq!("as-number", l.to_string());
+/// ```
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy, Serialize, Deserialize)]
 pub enum Label {
     Greek(char),
     Alpha(usize),
-    Str([char; 8]),
+    Str([u8; LABEL_SIZE]),
 }
 
 /// What a cell of the graph stands for.

@@ -263,7 +263,7 @@ mod tests {
     fn errors_when_label_segment_is_too_long() {
         let mut g: Sodg<16> = Sodg::empty(256);
         g.formation(0, &[]);
-        let too_long = "abcdefghi";
+        let too_long = "abcdefghijklmnopqrstuvwxyz0123456";
         let result = g.find_with_closure(0, too_long, |_v, _a| Ok(String::new()));
         assert!(result.is_err());
         let err = result.err().unwrap();
