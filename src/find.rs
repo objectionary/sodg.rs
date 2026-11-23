@@ -94,7 +94,7 @@ impl<const N: usize> Sodg<N> {
                     .cells
                     .get(current)
                     .with_context(|| format!("Can't find c{current}"))?;
-                if cell.branch == 0 {
+                if !cell.made {
                     bail!("Can't find c{current}");
                 }
                 cell.edges
@@ -126,7 +126,7 @@ impl<const N: usize> Sodg<N> {
             .cells
             .get(id)
             .with_context(|| format!("Can't find c{id}"))?;
-        if cell.branch == 0 {
+        if !cell.made {
             bail!("Can't find c{id}");
         }
         Ok(())

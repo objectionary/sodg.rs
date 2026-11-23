@@ -5,7 +5,7 @@ use std::fmt::{self, Debug, Display, Formatter};
 
 use anyhow::{Context as _, Result};
 
-use crate::{Kind, Persistence, Sodg};
+use crate::{Kind, Sodg};
 
 impl<const N: usize> Display for Sodg<N> {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
@@ -17,7 +17,7 @@ impl<const N: usize> Debug for Sodg<N> {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         let mut lines = vec![];
         for (v, cell) in self.cells.iter() {
-            if cell.branch == 0 {
+            if !cell.made {
                 continue;
             }
             let mut attrs = cell
@@ -25,8 +25,8 @@ impl<const N: usize> Debug for Sodg<N> {
                 .iter()
                 .map(|e| format!("\n\t{} ➞ c{}", e.0, e.1))
                 .collect::<Vec<String>>();
-            if cell.persistence != Persistence::Empty {
-                attrs.push(format!("{}", cell.data));
+            if let Some(d) = &cell.data {
+                attrs.push(format!("{d}"));
             }
             if let Some(name) = &cell.lambda {
                 attrs.push(format!("λ ⤍ {name}"));
@@ -38,19 +38,6 @@ impl<const N: usize> Debug for Sodg<N> {
                 Kind::Application(a) => format!("A({a}) "),
             };
             lines.push(format!("c{v} -> {kind}⟦{}⟧", attrs.join(", ")));
-        }
-        for (b, members) in self.branches.iter() {
-            if members.is_empty() {
-                continue;
-            }
-            lines.push(format!(
-                "b{b}: {{{}}}",
-                members
-                    .into_iter()
-                    .map(|v| format!("c{v}"))
-                    .collect::<Vec<String>>()
-                    .join(", ")
-            ));
         }
         f.write_str(lines.join("\n").as_str())
     }
@@ -75,11 +62,7 @@ impl<const N: usize> Sodg<N> {
             .collect();
         Ok(format!(
             "c{c}⟦{}{}⟧",
-            if cell.persistence == Persistence::Empty {
-                ""
-            } else {
-                "Δ, "
-            },
+            if cell.data.is_some() { "Δ, " } else { "" },
             list.join(", ")
         ))
     }

@@ -21,7 +21,7 @@ impl<const N: usize> Sodg<N> {
     pub fn keys(&self) -> Vec<usize> {
         self.cells
             .iter()
-            .filter(|(_, cell)| cell.branch != 0)
+            .filter(|(_, cell)| cell.made)
             .map(|(v, _)| v)
             .collect::<Vec<usize>>()
     }

@@ -3,7 +3,7 @@
 
 use itertools::Itertools;
 
-use crate::{BRANCH_NONE, Label, Persistence, Sodg};
+use crate::{Label, Sodg};
 
 impl<const N: usize> Sodg<N> {
     /// Print SODG as a DOT graph.
@@ -47,21 +47,19 @@ digraph {
         for (v, cell) in self
             .cells
             .iter()
-            .filter(|(_, cell)| cell.branch != BRANCH_NONE)
+            .filter(|(_, cell)| cell.made)
             .sorted_by_key(|(v, _)| *v)
         {
             lines.push(format!(
                 "  c{v}[shape=circle,label=\"c{v}\"{}]; {}",
-                if cell.persistence == Persistence::Empty {
-                    ""
-                } else {
+                if cell.data.is_some() {
                     ",color=\"#f96900\""
-                },
-                if cell.persistence == Persistence::Empty {
-                    String::new()
                 } else {
-                    format!("/* {} */", cell.data)
+                    ""
                 },
+                cell.data
+                    .as_ref()
+                    .map_or_else(String::new, |d| format!("/* {d} */")),
             ));
             for e in cell.edges.iter().sorted_by_key(|e| e.0) {
                 lines.push(format!(
@@ -116,15 +114,16 @@ fn escapes_quotes_in_edge_labels() {
 }
 
 #[test]
-fn skips_collected_cells_in_dot() {
+fn keeps_read_cells_in_dot() {
     let mut g: Sodg<16> = Sodg::empty(256);
     g.formation(1, &[]);
     g.formation(2, &[]);
     g.put(1, Label::Alpha(0), 2);
     g.delta(2, &Hex::from_str_bytes("hello"));
-    g.data(2);
-    assert_eq!(0, g.len());
+    assert!(g.data(2).is_some());
+    assert_eq!(2, g.len());
     let dot = g.to_dot();
-    assert!(!dot.contains("c1"));
-    assert!(!dot.contains("c2"));
+    assert!(dot.contains("label=\"c1\""));
+    assert!(dot.contains("label=\"c2\""));
+    assert!(!dot.contains("label=\"c0\""));
 }

@@ -5,7 +5,7 @@ use anyhow::Result;
 use itertools::Itertools as _;
 use xml_builder::{XMLBuilder, XMLElement, XMLVersion};
 
-use crate::{BRANCH_NONE, Kind, Persistence, Sodg};
+use crate::{Kind, Sodg};
 
 impl<const N: usize> Sodg<N> {
     /// Make XML graph.
@@ -53,7 +53,7 @@ impl<const N: usize> Sodg<N> {
         for (v, cell) in self
             .cells
             .iter()
-            .filter(|(_, cell)| cell.branch != BRANCH_NONE)
+            .filter(|(_, cell)| cell.made)
             .sorted_by_key(|(v, _)| *v)
         {
             let mut c_node = XMLElement::new("cell");
@@ -76,9 +76,9 @@ impl<const N: usize> Sodg<N> {
                 e_node.add_attribute("to", e.1.to_string().as_str());
                 c_node.add_child(e_node)?;
             }
-            if cell.persistence != Persistence::Empty {
+            if let Some(d) = &cell.data {
                 let mut data_node = XMLElement::new("data");
-                data_node.add_text(cell.data.print().replace('-', " "))?;
+                data_node.add_text(d.print().replace('-', " "))?;
                 c_node.add_child(data_node)?;
             }
             if let Some(name) = &cell.lambda {
@@ -159,16 +159,16 @@ mod tests {
     }
 
     #[test]
-    fn skips_collected_cells_in_xml() {
+    fn keeps_read_cells_in_xml() {
         let mut g: Sodg<16> = Sodg::empty(256);
         g.formation(1, &[]);
         g.formation(2, &[]);
         g.put(1, Label::Alpha(0), 2);
         g.delta(2, &Hex::from_str_bytes("hello"));
-        g.data(2);
-        assert_eq!(0, g.len());
+        assert!(g.data(2).is_some());
+        assert_eq!(2, g.len());
         let xml = g.to_xml().unwrap();
-        assert!(!xml.contains("<cell"));
-        assert!(!xml.contains("<data>"));
+        assert_eq!(2, xml.matches("<cell").count());
+        assert!(xml.contains("<data>"));
     }
 }
