@@ -103,6 +103,17 @@ mod tests {
     }
 
     #[test]
+    fn keeps_reserved_id_after_load() {
+        let mut g: Sodg<1> = Sodg::empty(100);
+        assert_eq!(0, g.next_id());
+        let tmp = TempDir::new().unwrap();
+        let file = tmp.path().join("foo.sodg");
+        g.save(file.as_path()).unwrap();
+        let mut after: Sodg<1> = Sodg::load(file.as_path()).unwrap();
+        assert_eq!(1, after.next_id());
+    }
+
+    #[test]
     fn saves_and_loads() {
         let mut g: Sodg<1> = Sodg::empty(100);
         g.formation(0, &[]);

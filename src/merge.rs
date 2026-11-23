@@ -24,6 +24,9 @@ impl<const N: usize> Sodg<N> {
     ///
     /// If it's impossible to merge, an error will be returned.
     pub fn merge(&mut self, g: &Self, left: usize, right: usize) -> Result<()> {
+        if self.cells.get(left).is_none_or(|c| c.branch == 0) {
+            bail!("Can't find c{left} in the destination graph");
+        }
         let mut mapped = HashMap::new();
         let before = self.len();
         self.merge_rec(g, left, right, &mut mapped)?;
@@ -174,6 +177,23 @@ mod tests {
     use super::*;
 
     #[test]
+    fn rejects_missing_left_with_empty_right() {
+        let mut g: Sodg<16> = Sodg::empty(256);
+        let mut extra: Sodg<16> = Sodg::empty(256);
+        extra.formation(0, &[]);
+        assert!(g.merge(&extra, 0, 0).is_err());
+    }
+
+    #[test]
+    fn rejects_missing_left_with_data_in_right() {
+        let mut g: Sodg<16> = Sodg::empty(256);
+        let mut extra: Sodg<16> = Sodg::empty(256);
+        extra.formation(0, &[]);
+        extra.delta(0, &Hex::from(42));
+        assert!(g.merge(&extra, 0, 0).is_err());
+    }
+
+    #[test]
     fn merges_two_graphs() {
         let mut g: Sodg<16> = Sodg::empty(256);
         g.formation(0, &[]);
@@ -192,6 +212,7 @@ mod tests {
     #[test]
     fn merges_two_non_trees() {
         let mut g: Sodg<16> = Sodg::empty(256);
+        g.formation(0, &[]);
         let mut extra = Sodg::empty(256);
         extra.formation(0, &[]);
         extra.formation(42, &[]);

@@ -197,7 +197,6 @@ pub struct Sodg<const N: usize> {
     cells: emap::Map<Cell<N>>,
     /// This is the next ID of a cell to be returned by the [`Sodg::next_id`]
     /// function.
-    #[serde(skip_serializing, skip_deserializing)]
     next_c: usize,
 }
 

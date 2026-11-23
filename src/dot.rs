@@ -3,7 +3,7 @@
 
 use itertools::Itertools;
 
-use crate::{Label, Persistence, Sodg};
+use crate::{BRANCH_NONE, Label, Persistence, Sodg};
 
 impl<const N: usize> Sodg<N> {
     /// Print SODG as a DOT graph.
@@ -44,7 +44,12 @@ digraph {
   edge [fontname=\"Arial\"];"
                 .to_string(),
         );
-        for (v, cell) in self.cells.iter().sorted_by_key(|(v, _)| *v) {
+        for (v, cell) in self
+            .cells
+            .iter()
+            .filter(|(_, cell)| cell.branch != BRANCH_NONE)
+            .sorted_by_key(|(v, _)| *v)
+        {
             lines.push(format!(
                 "  c{v}[shape=circle,label=\"c{v}\"{}]; {}",
                 if cell.persistence == Persistence::Empty {
@@ -93,4 +98,18 @@ fn simple_graph_to_dot() {
     g.put(0, Label::Alpha(0), 1);
     let dot = g.to_dot();
     assert!(dot.contains("shape=circle,label=\"c0\""));
+}
+
+#[test]
+fn skips_collected_cells_in_dot() {
+    let mut g: Sodg<16> = Sodg::empty(256);
+    g.formation(1, &[]);
+    g.formation(2, &[]);
+    g.put(1, Label::Alpha(0), 2);
+    g.delta(2, &Hex::from_str_bytes("hello"));
+    g.data(2);
+    assert_eq!(0, g.len());
+    let dot = g.to_dot();
+    assert!(!dot.contains("c1"));
+    assert!(!dot.contains("c2"));
 }
