@@ -47,9 +47,16 @@ impl<const N: usize> Sodg<N> {
         let bytes =
             fs::read(path).with_context(|| format!("Can't read from {}", path.display()))?;
         let size = bytes.len();
-        let sodg: Self = bincode::serde::decode_from_slice(&bytes, bincode::config::legacy())
-            .with_context(|| format!("Can't deserialize from {}", path.display()))?
-            .0;
+        let (sodg, used): (Self, usize) =
+            bincode::serde::decode_from_slice(&bytes, bincode::config::legacy())
+                .with_context(|| format!("Can't deserialize from {}", path.display()))?;
+        if used != size {
+            anyhow::bail!(
+                "Unexpected {} trailing bytes in {}",
+                size - used,
+                path.display()
+            );
+        }
         trace!(
             "Deserialized {} cells ({} bytes) from {} in {:?}",
             sodg.len(),
@@ -80,6 +87,19 @@ mod tests {
         let file = tmp.path().join("foo.sodg");
         g.save(file.as_path()).unwrap();
         assert!(file.metadata().unwrap().len() > 0);
+    }
+
+    #[test]
+    fn rejects_trailing_bytes() {
+        let mut g: Sodg<1> = Sodg::empty(100);
+        g.formation(0, &[]);
+        let tmp = TempDir::new().unwrap();
+        let file = tmp.path().join("foo.sodg");
+        g.save(file.as_path()).unwrap();
+        let mut bytes = fs::read(&file).unwrap();
+        bytes.push(42);
+        fs::write(&file, bytes).unwrap();
+        assert!(Sodg::<1>::load(file.as_path()).is_err());
     }
 
     #[test]

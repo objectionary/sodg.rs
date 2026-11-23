@@ -65,7 +65,11 @@ digraph {
                 lines.push(format!(
                     "  c{v} -> c{} [label=\"{}\"{}{}];",
                     e.1,
-                    e.0,
+                    e.0.to_string()
+                        .replace('\\', "\\\\")
+                        .replace('"', "\\\"")
+                        .replace('\n', "\\n")
+                        .replace('\r', "\\r"),
                     match e.0 {
                         Label::Greek(g) if *g == 'ρ' || *g == 'σ' => {
                             ",color=gray,fontcolor=gray"
@@ -96,6 +100,17 @@ fn simple_graph_to_dot() {
     g.put(0, Label::Alpha(0), 1);
     let dot = g.to_dot();
     assert!(dot.contains("shape=circle,label=\"c0\""));
+}
+
+#[test]
+fn escapes_quotes_in_edge_labels() {
+    use std::str::FromStr;
+    let mut g: Sodg<16> = Sodg::empty(256);
+    g.formation(0, &[]);
+    g.formation(1, &[]);
+    g.put(0, Label::from_str("a\"b").unwrap(), 1);
+    let dot = g.to_dot();
+    assert!(dot.contains("[label=\"a\\\"b\"]"), "{dot}");
 }
 
 #[test]
