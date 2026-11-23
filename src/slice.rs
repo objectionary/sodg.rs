@@ -6,7 +6,7 @@ use std::collections::HashSet;
 use anyhow::Result;
 use log::trace;
 
-use crate::{Label, Persistence, Sodg};
+use crate::{Label, Sodg};
 
 impl<const N: usize> Sodg<N> {
     /// Take a slice of the graph, keeping only the cell specified
@@ -64,12 +64,8 @@ impl<const N: usize> Sodg<N> {
         let mut ng = Self::empty(self.cells.capacity());
         for (v1, cell) in self.cells.iter().filter(|(c, _)| done.contains(c)) {
             ng.make(v1);
-            let data = (cell.persistence != Persistence::Empty).then(|| cell.data.clone());
-            if let Some(d) = data {
-                ng.delta(v1, &d);
-                if cell.persistence == Persistence::Taken {
-                    ng.data(v1);
-                }
+            if let Some(d) = &cell.data {
+                ng.delta(v1, d);
             }
             let copy = ng.cells.get_mut(v1).unwrap();
             copy.kind = cell.kind;
@@ -136,7 +132,7 @@ mod tests {
         g.put(0, x, 1);
         g.formation(2, &[]);
         g.delta(2, &crate::Hex::from(9_i64));
-        let mut slice = g.slice(0).unwrap();
+        let slice = g.slice(0).unwrap();
         assert_eq!(2, slice.len());
         assert_eq!(Some(crate::Hex::from(42_i64)), slice.data(0));
         assert_eq!(Some(crate::Hex::from(7_i64)), slice.data(1));

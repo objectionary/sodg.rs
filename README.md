@@ -13,11 +13,10 @@
 
 This Rust library implements a Surging Object DiGraph (SODG) for
 [reo](https://github.com/objectionary/reo) virtual machine for
-[EO](https://www.eolang.org) programs. The graph is "surging" because
-it automatically behind the scene deletes cells and edges from itself,
-which is also known as "garbage collection" mechanism. A cell gets deleted
-right after the data it contains is read _and_ no other cells
-transitively point to it.
+[EO](https://www.eolang.org) programs. Cells are never deleted:
+once made, a cell stays in the graph, and reading its data
+doesn't change anything, so an object may be dataized
+any number of times.
 
 Each cell of the graph stands for a 𝜑-expression.
 There are six methods that build the graph, one per command

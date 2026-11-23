@@ -8,8 +8,6 @@ impl<const N: usize> Clone for Sodg<N> {
     fn clone(&self) -> Self {
         Self {
             cells: self.cells.clone(),
-            branches: self.branches.clone(),
-            stores: self.stores.clone(),
             next_c: self.next_c,
         }
     }

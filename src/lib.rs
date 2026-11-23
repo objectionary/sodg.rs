@@ -5,9 +5,9 @@
 //! which we call Surging Object `DiGraph` (SODG), because it expects
 //! modifications coming from a user (through [`Sodg::formation`],
 //! [`Sodg::dispatch`], [`Sodg::application`], [`Sodg::put`],
-//! [`Sodg::delta`], and [`Sodg::lambda`]) and then decides itself when
-//! it's time to delete some cells (something similar to
-//! "garbage collection").
+//! [`Sodg::delta`], and [`Sodg::lambda`]). Cells are never deleted:
+//! once made, a cell stays in the graph, and reading its Δ-asset
+//! with [`Sodg::data`] doesn't change anything.
 //!
 //! Every cell stands for a 𝜑-expression and has a [`Kind`]:
 //!
@@ -71,15 +71,6 @@ mod slice;
 mod xml;
 
 const HEX_SIZE: usize = 8;
-// @todo #313:90min A branch can't hold more than `MAX_BRANCH_SIZE` cells,
-//  while the output of `phino sodg` for any real program has many more
-//  cells connected to each other. Deploying such an output with
-//  `Script::deploy_to()` panics with "No more space left in the stack" from
-//  `microstack`. Let's make branches grow, or join them when cells of
-//  two branches get connected, and deploy a script with a few hundred cells
-//  in a test.
-const MAX_BRANCHES: usize = 16;
-const MAX_BRANCH_SIZE: usize = 16;
 
 /// An object-oriented representation of binary data
 /// in hexadecimal format, which can be put into cells of the graph.
@@ -192,31 +183,20 @@ pub struct Script {
 /// project, as a memory model for objects and dependencies between them.
 #[derive(Serialize, Deserialize)]
 pub struct Sodg<const N: usize> {
-    stores: emap::Map<usize>,
-    branches: emap::Map<microstack::Stack<usize, MAX_BRANCH_SIZE>>,
     cells: emap::Map<Cell<N>>,
     /// This is the next ID of a cell to be returned by the [`Sodg::next_id`]
     /// function.
     next_c: usize,
 }
 
-#[derive(PartialEq, Serialize, Deserialize, Clone)]
-enum Persistence {
-    Empty,
-    Stored,
-    Taken,
-}
-
-const BRANCH_NONE: usize = 0;
-const BRANCH_STATIC: usize = 1;
-
 #[derive(Serialize, Deserialize, Clone)]
 struct Cell<const N: usize> {
-    branch: usize,
+    /// Whether the cell was made by [`Sodg::formation`],
+    /// [`Sodg::dispatch`], or [`Sodg::application`].
+    made: bool,
     kind: Kind,
     attrs: Vec<Label>,
-    data: Hex,
-    persistence: Persistence,
+    data: Option<Hex>,
     lambda: Option<String>,
     edges: micromap::Map<Label, usize, N>,
 }

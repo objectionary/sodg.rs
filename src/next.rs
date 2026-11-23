@@ -18,7 +18,7 @@ impl<const N: usize> Sodg<N> {
         id = self
             .cells
             .iter()
-            .find(|(v, cell)| cell.branch == 0 && *v >= id)
+            .find(|(v, cell)| !cell.made && *v >= id)
             .map(|(v, _)| v)
             .unwrap();
         let next = id + 1;

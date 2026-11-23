@@ -297,6 +297,39 @@ P c0 bar c7
     }
 
     #[test]
+    fn keeps_program_alive_after_reading_data() {
+        let mut g: Sodg<16> = Sodg::empty(256);
+        Script::from_str(
+            "F c0 int foo
+F c1 x inc φ
+F c2 ρ
+λ c2 L_inc
+P c1 inc c2
+D c3 c1 x
+P c1 φ c3
+P c0 int c1
+D c4 c0 int
+F c5
+Δ c5 00-00-00-00-00-00-00-29
+A c6 c4 x c5
+D c7 c6 inc
+P c0 foo c7
+",
+        )
+        .deploy_to(&mut g)
+        .unwrap();
+        assert_eq!(8, g.len());
+        assert_eq!(0x29, g.data(5).unwrap().to_i64().unwrap());
+        assert_eq!(8, g.len());
+        assert_eq!(
+            7,
+            g.find_with_closure(0, "foo", |_, _| Ok(String::new()))
+                .unwrap()
+        );
+        assert_eq!(0x29, g.data(5).unwrap().to_i64().unwrap());
+    }
+
+    #[test]
     fn deploys_with_comments_and_blank_lines() {
         let mut g: Sodg<16> = Sodg::empty(256);
         let mut s = Script::from_str(

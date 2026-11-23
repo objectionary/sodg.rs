@@ -5,7 +5,7 @@ use anyhow::Context as _;
 #[cfg(debug_assertions)]
 use log::trace;
 
-use crate::{BRANCH_NONE, BRANCH_STATIC, Persistence, Sodg};
+use crate::Sodg;
 use crate::{Hex, Kind, Label};
 
 impl<const N: usize> Sodg<N> {
@@ -149,12 +149,7 @@ impl<const N: usize> Sodg<N> {
     /// If the cell `c` is out of the capacity of the graph.
     #[inline]
     pub fn delta(&mut self, c: usize, d: &Hex) {
-        let cell = self.cells.get_mut(c).unwrap();
-        if cell.persistence != Persistence::Stored {
-            *self.stores.get_mut(cell.branch).unwrap() += 1;
-        }
-        cell.persistence = Persistence::Stored;
-        cell.data = d.clone();
+        self.cells.get_mut(c).unwrap().data = Some(d.clone());
         #[cfg(debug_assertions)]
         trace!("#delta: data of c{c} set to {d}");
     }
@@ -218,65 +213,21 @@ impl<const N: usize> Sodg<N> {
 
     /// Make the cell `c` alive, if it is not alive yet.
     pub(crate) fn make(&mut self, c: usize) {
-        let cell = self.cells.get_mut(c).unwrap();
-        if cell.branch == BRANCH_NONE {
-            cell.branch = BRANCH_STATIC;
-        }
+        self.cells.get_mut(c).unwrap().made = true;
     }
 
     /// Make an edge from the cell `c1` to the cell `c2` and put
     /// the label `a` on it, replacing the edge with the same label, if any.
     pub(crate) fn link(&mut self, c1: usize, c2: usize, a: Label) {
-        let mut ours = self.cells.get(c1).unwrap().branch;
-        let theirs = self.cells.get(c2).unwrap().branch;
         self.cells.get_mut(c1).unwrap().edges.insert(a, c2);
-        if ours == BRANCH_STATIC {
-            if theirs == BRANCH_STATIC {
-                for b in self.branches.iter_mut() {
-                    if b.1.is_empty() {
-                        b.1.push(c1);
-                        ours = b.0;
-                        break;
-                    }
-                }
-                self.relocate(c1, ours, false);
-                self.relocate(c2, ours, true);
-            } else {
-                self.relocate(c1, theirs, true);
-            }
-        } else if self.cells.get(c2).unwrap().branch == BRANCH_STATIC {
-            self.relocate(c2, ours, true);
-        }
         #[cfg(debug_assertions)]
-        trace!(
-            "#link: edge added c{}(b={}).{} → c{}(b={})",
-            c1,
-            self.cells.get(c1).unwrap().branch,
-            a,
-            c2,
-            self.cells.get(c2).unwrap().branch,
-        );
+        trace!("#link: edge added c{c1}.{a} → c{c2}");
     }
 
-    /// Move the cell `c` from the static branch into the branch `b`,
-    /// carrying its stored data along, so that the branch knows
-    /// how many cells with data it has.
-    fn relocate(&mut self, c: usize, b: usize, push: bool) {
-        let cell = self.cells.get_mut(c).unwrap();
-        let before = cell.branch;
-        cell.branch = b;
-        if cell.persistence == Persistence::Stored {
-            *self.stores.get_mut(before).unwrap() -= 1;
-            *self.stores.get_mut(b).unwrap() += 1;
-        }
-        if push {
-            self.branches.get_mut(b).unwrap().push(c);
-        }
-    }
-
-    /// Read cell data, and then submit the cell to garbage collection.
+    /// Read the Δ-asset of the cell `c`.
     ///
-    /// For example:
+    /// Reading doesn't change the graph, so the same data
+    /// may be read any number of times:
     ///
     /// ```
     /// use sodg::Hex;
@@ -285,6 +236,7 @@ impl<const N: usize> Sodg<N> {
     /// g.formation(42, &[]);
     /// let data = Hex::from_str_bytes("hello, world!");
     /// g.delta(42, &data);
+    /// assert_eq!(data, g.data(42).unwrap());
     /// assert_eq!(data, g.data(42).unwrap());
     /// ```
     ///
@@ -299,46 +251,11 @@ impl<const N: usize> Sodg<N> {
     ///
     /// # Panics
     ///
-    /// If the cell `c` is absent, it will panic.
+    /// If the cell `c` is out of the capacity of the graph.
+    #[must_use]
     #[inline]
-    pub fn data(&mut self, c: usize) -> Option<Hex> {
-        let cell = self.cells.get_mut(c).unwrap();
-        match cell.persistence {
-            Persistence::Stored => {
-                let d = cell.data.clone();
-                cell.persistence = Persistence::Taken;
-                let branch = cell.branch;
-                let s = self.stores.get_mut(branch).unwrap();
-                *s -= 1;
-                if *s == 0 {
-                    let members = self.branches.get_mut(branch).unwrap();
-                    for m in members.into_iter() {
-                        self.cells.get_mut(m).unwrap().branch = BRANCH_NONE;
-                    }
-                    #[cfg(debug_assertions)]
-                    trace!(
-                        "#data: branch no.{} destroyed {} cells as garbage: {}",
-                        branch,
-                        members.len(),
-                        members
-                            .into_iter()
-                            .map(|m| format!("c{m}"))
-                            .collect::<Vec<String>>()
-                            .join(", ")
-                    );
-                    members.clear();
-                }
-                #[cfg(debug_assertions)]
-                trace!("#data: data of c{c} retrieved");
-                Some(d)
-            }
-            Persistence::Taken => {
-                #[cfg(debug_assertions)]
-                trace!("#data: data of c{c} retrieved again");
-                Some(cell.data.clone())
-            }
-            Persistence::Empty => None,
-        }
+    pub fn data(&self, c: usize) -> Option<Hex> {
+        self.cells.get(c).unwrap().data.clone()
     }
 
     /// Find all kids of a cell.
@@ -446,40 +363,6 @@ mod tests {
     }
 
     #[test]
-    fn sets_branch_correctly() {
-        let mut g: Sodg<16> = Sodg::empty(256);
-        g.formation(1, &[]);
-        g.formation(2, &[]);
-        g.put(1, Label::Alpha(0), 2);
-        assert_eq!(1, g.branches.get(1).unwrap().len());
-        assert_eq!(2, g.branches.get(2).unwrap().len());
-        g.delta(2, &Hex::from(42));
-        assert_eq!(&1, g.stores.get(2).unwrap());
-        g.formation(3, &[]);
-        g.put(1, Label::Alpha(1), 3);
-        assert_eq!(3, g.branches.get(2).unwrap().len());
-        g.formation(4, &[]);
-        g.formation(5, &[]);
-        g.put(4, Label::Alpha(0), 5);
-        assert_eq!(2, g.branches.get(3).unwrap().len());
-        g.data(2);
-        assert_eq!(0, g.branches.get(2).unwrap().len());
-    }
-
-    #[test]
-    fn carries_data_into_dynamic_branch() {
-        let mut g: Sodg<16> = Sodg::empty(256);
-        g.formation(1, &[label("x")]);
-        g.formation(2, &[]);
-        g.delta(2, &Hex::from(42_i64));
-        g.put(1, label("x"), 2);
-        let branch = g.cells.get(2).unwrap().branch;
-        assert_eq!(&1, g.stores.get(branch).unwrap());
-        assert_eq!(&0, g.stores.get(BRANCH_STATIC).unwrap());
-        assert_eq!(42, g.data(2).unwrap().to_i64().unwrap());
-    }
-
-    #[test]
     fn makes_dispatch() {
         let mut g: Sodg<16> = Sodg::empty(256);
         g.formation(1, &[label("x")]);
@@ -550,67 +433,6 @@ mod tests {
     }
 
     #[test]
-    fn moves_static_cells_into_dynamic_branch() {
-        let mut g: Sodg<16> = Sodg::empty(256);
-        g.formation(1, &[]);
-        g.formation(2, &[]);
-        g.put(1, Label::Alpha(0), 2);
-        let branch = g.cells.get(1).unwrap().branch;
-        assert_ne!(BRANCH_STATIC, branch);
-        assert_eq!(branch, g.cells.get(2).unwrap().branch);
-        let members: Vec<usize> = g.branches.get(branch).unwrap().iter().copied().collect();
-        assert!(members.contains(&1));
-        assert!(members.contains(&2));
-    }
-
-    #[test]
-    fn joins_static_cell_to_existing_branch() {
-        let mut g: Sodg<16> = Sodg::empty(256);
-        g.formation(1, &[]);
-        g.formation(2, &[]);
-        g.put(1, Label::Alpha(0), 2);
-        let dynamic_branch = g.cells.get(1).unwrap().branch;
-        g.formation(3, &[]);
-        assert_eq!(BRANCH_STATIC, g.cells.get(3).unwrap().branch);
-        g.put(3, Label::Alpha(1), 1);
-        assert_eq!(dynamic_branch, g.cells.get(3).unwrap().branch);
-        let members: Vec<usize> = g
-            .branches
-            .get(dynamic_branch)
-            .unwrap()
-            .iter()
-            .copied()
-            .collect();
-        assert_eq!(3, members.len());
-        assert!(members.contains(&1));
-        assert!(members.contains(&2));
-        assert!(members.contains(&3));
-    }
-
-    #[test]
-    fn promotes_target_from_static_branch() {
-        let mut g: Sodg<16> = Sodg::empty(256);
-        g.formation(1, &[]);
-        g.formation(2, &[]);
-        g.put(1, Label::Alpha(0), 2);
-        let dynamic_branch = g.cells.get(1).unwrap().branch;
-        g.formation(3, &[]);
-        assert_eq!(BRANCH_STATIC, g.cells.get(3).unwrap().branch);
-        g.put(1, Label::Alpha(1), 3);
-        assert_eq!(dynamic_branch, g.cells.get(3).unwrap().branch);
-        let members: Vec<usize> = g
-            .branches
-            .get(dynamic_branch)
-            .unwrap()
-            .iter()
-            .copied()
-            .collect();
-        assert!(members.contains(&1));
-        assert!(members.contains(&2));
-        assert!(members.contains(&3));
-    }
-
-    #[test]
     fn puts_to_root() {
         let mut g: Sodg<16> = Sodg::empty(256);
         g.formation(0, &[]);
@@ -627,21 +449,6 @@ mod tests {
         g.formation(0, &[]);
         g.delta(0, &data);
         assert_eq!(data, g.data(0).unwrap());
-    }
-
-    #[test]
-    fn collects_garbage() {
-        let mut g: Sodg<16> = Sodg::empty(256);
-        g.formation(1, &[]);
-        g.formation(2, &[]);
-        g.put(1, Label::Alpha(0), 2);
-        g.delta(2, &Hex::from_str_bytes("hello"));
-        g.formation(3, &[]);
-        g.put(1, Label::Alpha(0), 3);
-        assert_eq!(3, g.len());
-        assert_eq!(3, g.branches.get(2).unwrap().len());
-        g.data(2);
-        assert_eq!(0, g.len());
     }
 
     #[test]
@@ -700,5 +507,32 @@ mod tests {
         g.formation(0, &[label("x")]);
         assert_eq!(1, g.len());
         assert_eq!(&[label("x")], g.attrs(0));
+    }
+
+    #[test]
+    fn keeps_root_after_reading_lonely_cell() {
+        let mut g: Sodg<16> = Sodg::empty(256);
+        g.formation(0, &[label("a")]);
+        g.formation(1, &[]);
+        g.put(0, label("a"), 1);
+        g.formation(9, &[]);
+        g.delta(9, &Hex::from(42_i64));
+        assert_eq!(vec![0, 1, 9], g.keys());
+        assert_eq!(42, g.data(9).unwrap().to_i64().unwrap());
+        assert_eq!(vec![0, 1, 9], g.keys());
+    }
+
+    #[test]
+    fn never_reuses_id_after_reading_data() {
+        let mut g: Sodg<16> = Sodg::empty(256);
+        g.formation(0, &[label("a")]);
+        g.formation(1, &[label("b")]);
+        g.formation(2, &[]);
+        g.delta(2, &Hex::from(1_i64));
+        g.put(0, label("a"), 1);
+        g.put(1, label("b"), 2);
+        assert_eq!(1, g.data(2).unwrap().to_i64().unwrap());
+        assert_eq!(3, g.next_id());
+        assert_eq!(3, g.len());
     }
 }

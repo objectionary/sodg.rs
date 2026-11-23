@@ -6,7 +6,7 @@ use std::collections::{HashMap, HashSet};
 use anyhow::{Context, Result, bail};
 use log::debug;
 
-use crate::{Kind, Label, Persistence, Sodg};
+use crate::{Kind, Label, Sodg};
 
 impl<const N: usize> Sodg<N> {
     /// Merge another graph into the current one.
@@ -24,7 +24,7 @@ impl<const N: usize> Sodg<N> {
     ///
     /// If it's impossible to merge, an error will be returned.
     pub fn merge(&mut self, g: &Self, left: usize, right: usize) -> Result<()> {
-        if self.cells.get(left).is_none_or(|c| c.branch == 0) {
+        if self.cells.get(left).is_none_or(|c| !c.made) {
             bail!("Can't find c{left} in the destination graph");
         }
         let mut mapped = HashMap::new();
@@ -91,9 +91,9 @@ impl<const N: usize> Sodg<N> {
             .with_context(|| format!("Can't find c{right}"))?;
 
         // Merge payload if present
-        if v.persistence != Persistence::Empty {
+        if let Some(d) = &v.data {
             // delta: merges data from right into left
-            self.delta(left, &v.data);
+            self.delta(left, d);
         }
 
         // Merge the kind, the attributes, and the λ-asset, if present

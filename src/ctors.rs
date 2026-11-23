@@ -3,7 +3,7 @@
 
 use emap::Map;
 
-use crate::{Cell, Hex, Kind, MAX_BRANCHES, Persistence, Sodg};
+use crate::{Cell, Kind, Sodg};
 
 impl<const N: usize> Sodg<N> {
     /// Make an empty [`Sodg`], with no cells and no edges.
@@ -13,26 +13,20 @@ impl<const N: usize> Sodg<N> {
     /// May panic if cells provided to alerts are absent (should never happen, though).
     #[must_use]
     pub fn empty(cap: usize) -> Self {
-        let mut g = Self {
+        Self {
             cells: Map::with_capacity_some(
                 cap,
                 Cell {
-                    branch: 0,
+                    made: false,
                     kind: Kind::Void,
                     attrs: Vec::new(),
-                    data: Hex::empty(),
-                    persistence: Persistence::Empty,
+                    data: None,
                     lambda: None,
                     edges: micromap::Map::new(),
                 },
             ),
-            stores: Map::with_capacity_some(MAX_BRANCHES, 0),
-            branches: Map::with_capacity_some(MAX_BRANCHES, microstack::Stack::new()),
             next_c: 0,
-        };
-        g.branches.insert(0, microstack::Stack::from_vec(vec![0]));
-        g.branches.insert(1, microstack::Stack::from_vec(vec![0]));
-        g
+        }
     }
 }
 
