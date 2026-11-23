@@ -43,7 +43,7 @@
 //! assert_eq!(1, sodg.kid(0, foo).unwrap());
 //! ```
 
-#![doc(html_root_url = "https://docs.rs/sodg/0.0.0")]
+#![doc(html_root_url = "https://docs.rs/sodg/0.2.0")]
 #![deny(warnings)]
 #![warn(clippy::all, clippy::pedantic, clippy::nursery, clippy::cargo)]
 #![allow(clippy::multiple_inherent_impl)]
