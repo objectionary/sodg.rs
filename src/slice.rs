@@ -6,7 +6,7 @@ use std::collections::HashSet;
 use anyhow::Result;
 use log::trace;
 
-use crate::{Label, Sodg};
+use crate::{Label, Persistence, Sodg};
 
 impl<const N: usize> Sodg<N> {
     /// Take a slice of the graph, keeping only the cell specified
@@ -64,6 +64,13 @@ impl<const N: usize> Sodg<N> {
         let mut ng = Self::empty(self.cells.capacity());
         for (v1, cell) in self.cells.iter().filter(|(c, _)| done.contains(c)) {
             ng.make(v1);
+            let data = (cell.persistence != Persistence::Empty).then(|| cell.data.clone());
+            if let Some(d) = data {
+                ng.delta(v1, &d);
+                if cell.persistence == Persistence::Taken {
+                    ng.data(v1);
+                }
+            }
             let copy = ng.cells.get_mut(v1).unwrap();
             copy.kind = cell.kind;
             copy.attrs.clone_from(&cell.attrs);
@@ -116,6 +123,23 @@ mod tests {
         assert_eq!(crate::Kind::Dispatch(x), slice.kind(2));
         assert_eq!(&[x], slice.attrs(0));
         assert_eq!(Some("L_foo"), slice.atom(0));
+    }
+
+    #[test]
+    fn keeps_data_in_slice() {
+        let mut g: Sodg<16> = Sodg::empty(256);
+        let x = Label::from_str("x").unwrap();
+        g.formation(0, &[]);
+        g.delta(0, &crate::Hex::from(42_i64));
+        g.formation(1, &[]);
+        g.delta(1, &crate::Hex::from(7_i64));
+        g.put(0, x, 1);
+        g.formation(2, &[]);
+        g.delta(2, &crate::Hex::from(9_i64));
+        let mut slice = g.slice(0).unwrap();
+        assert_eq!(2, slice.len());
+        assert_eq!(Some(crate::Hex::from(42_i64)), slice.data(0));
+        assert_eq!(Some(crate::Hex::from(7_i64)), slice.data(1));
     }
 
     #[test]

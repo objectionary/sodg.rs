@@ -5,7 +5,7 @@ use anyhow::Result;
 use itertools::Itertools as _;
 use xml_builder::{XMLBuilder, XMLElement, XMLVersion};
 
-use crate::{Kind, Persistence, Sodg};
+use crate::{BRANCH_NONE, Kind, Persistence, Sodg};
 
 impl<const N: usize> Sodg<N> {
     /// Make XML graph.
@@ -50,7 +50,12 @@ impl<const N: usize> Sodg<N> {
             .encoding("UTF-8".into())
             .build();
         let mut root = XMLElement::new("sodg");
-        for (v, cell) in self.cells.iter().sorted_by_key(|(v, _)| *v) {
+        for (v, cell) in self
+            .cells
+            .iter()
+            .filter(|(_, cell)| cell.branch != BRANCH_NONE)
+            .sorted_by_key(|(v, _)| *v)
+        {
             let mut c_node = XMLElement::new("cell");
             c_node.add_attribute("id", v.to_string().as_str());
             match cell.kind {
@@ -151,5 +156,19 @@ mod tests {
                 .unwrap()
                 .string(),
         );
+    }
+
+    #[test]
+    fn skips_collected_cells_in_xml() {
+        let mut g: Sodg<16> = Sodg::empty(256);
+        g.formation(1, &[]);
+        g.formation(2, &[]);
+        g.put(1, Label::Alpha(0), 2);
+        g.delta(2, &Hex::from_str_bytes("hello"));
+        g.data(2);
+        assert_eq!(0, g.len());
+        let xml = g.to_xml().unwrap();
+        assert!(!xml.contains("<cell"));
+        assert!(!xml.contains("<data>"));
     }
 }
