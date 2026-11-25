@@ -69,6 +69,7 @@ impl<const N: usize> Sodg<N> {
                     c_node.add_attribute("kind", "application");
                     c_node.add_attribute("attr", a.to_string().as_str());
                 }
+                Kind::Termination => c_node.add_attribute("kind", "termination"),
             }
             for e in cell.edges.iter().sorted_by_key(|e| e.0) {
                 let mut e_node = XMLElement::new("e");
