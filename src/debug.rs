@@ -36,6 +36,7 @@ impl<const N: usize> Debug for Sodg<N> {
                 Kind::Formation => "F ".to_string(),
                 Kind::Dispatch(a) => format!("D.{a} "),
                 Kind::Application(a) => format!("A({a}) "),
+                Kind::Termination => "T ".to_string(),
             };
             lines.push(format!("c{v} -> {kind}⟦{}⟧", attrs.join(", ")));
         }

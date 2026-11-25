@@ -4,8 +4,8 @@
 //! This is a memory structure with cells and edges between them,
 //! which we call Surging Object `DiGraph` (SODG), because it expects
 //! modifications coming from a user (through [`Sodg::formation`],
-//! [`Sodg::dispatch`], [`Sodg::application`], [`Sodg::put`],
-//! [`Sodg::delta`], and [`Sodg::lambda`]). Cells are never deleted:
+//! [`Sodg::dispatch`], [`Sodg::application`], [`Sodg::termination`],
+//! [`Sodg::put`], [`Sodg::delta`], and [`Sodg::lambda`]). Cells are never deleted:
 //! once made, a cell stays in the graph, and reading its Δ-asset
 //! with [`Sodg::data`] doesn't change anything.
 //!
@@ -23,6 +23,8 @@
 //!   `proto( attr ↦ arg )`, see [`Sodg::application`]. The cell gets the
 //!   kind [`Kind::Application`] with `attr` inside, an edge `π` pointing
 //!   to `proto`, and an edge `attr` pointing to `arg`.
+//! - `T o` makes the cell `o` the termination `⊥`, see
+//!   [`Sodg::termination`]. The cell gets the kind [`Kind::Termination`].
 //! - `P o attr kid` puts `kid` to the attribute `attr` of `o`, making
 //!   an edge `attr` from `o` to `kid`, see [`Sodg::put`].
 //! - `Δ o data` sets the Δ-asset of `o`, see [`Sodg::delta`].
@@ -120,7 +122,7 @@ pub enum Label {
 /// What a cell of the graph stands for.
 ///
 /// A cell that was never made by [`Sodg::formation`], [`Sodg::dispatch`],
-/// or [`Sodg::application`] is [`Kind::Void`].
+/// [`Sodg::application`], or [`Sodg::termination`] is [`Kind::Void`].
 #[derive(PartialEq, Eq, Clone, Copy, Debug, Serialize, Deserialize)]
 pub enum Kind {
     /// Nothing is known about the cell.
@@ -134,6 +136,9 @@ pub enum Kind {
     /// the proto is the kid of the cell at the edge `π`, while the
     /// argument is the kid at the edge `attr`.
     Application(Label),
+    /// A termination, like `⊥`, which a VM must fail on only
+    /// when it actually reaches it.
+    Termination,
 }
 
 /// A wrapper of a plain text with graph-modifying instructions,

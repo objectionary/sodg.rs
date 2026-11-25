@@ -106,6 +106,31 @@ impl<const N: usize> Sodg<N> {
         trace!("#application: c{c} made as c{proto}({attr} ↦ c{arg})");
     }
 
+    /// Make the cell `c` a termination `⊥` (the command `T c`).
+    ///
+    /// The cell gets the kind [`Kind::Termination`] and loses its
+    /// attributes, while its edges stay. For example:
+    ///
+    /// ```
+    /// use sodg::{Kind, Sodg};
+    /// let mut g : Sodg<16> = Sodg::empty(256);
+    /// g.termination(1);
+    /// assert_eq!(Kind::Termination, g.kind(1));
+    /// ```
+    ///
+    /// # Panics
+    ///
+    /// If the cell `c` is out of the capacity of the graph.
+    #[inline]
+    pub fn termination(&mut self, c: usize) {
+        self.make(c);
+        let cell = self.cells.get_mut(c).unwrap();
+        cell.kind = Kind::Termination;
+        cell.attrs.clear();
+        #[cfg(debug_assertions)]
+        trace!("#termination: c{c} made as ⊥");
+    }
+
     /// Put the cell `kid` to the attribute `attr` of the cell `c`
     /// (the command `P c attr kid`), making an edge from `c` to `kid`.
     ///
@@ -381,6 +406,15 @@ mod tests {
         assert_eq!(Kind::Application(label("z")), g.kind(5));
         assert_eq!(3, g.kid(5, Label::Greek('π')).unwrap());
         assert_eq!(4, g.kid(5, label("z")).unwrap());
+    }
+
+    #[test]
+    fn makes_termination() {
+        let mut g: Sodg<16> = Sodg::empty(256);
+        g.formation(2, &[label("x")]);
+        g.termination(2);
+        assert_eq!(Kind::Termination, g.kind(2));
+        assert_eq!(0, g.attrs(2).len());
     }
 
     #[test]

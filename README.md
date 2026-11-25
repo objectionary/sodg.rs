@@ -19,7 +19,7 @@ doesn't change anything, so an object may be dataized
 any number of times.
 
 Each cell of the graph stands for a 𝜑-expression.
-There are six methods that build the graph, one per command
+There are seven methods that build the graph, one per command
 printed by [`phino sodg`](https://github.com/objectionary/phino):
 
 | Command | Method | What it does |
@@ -27,6 +27,7 @@ printed by [`phino sodg`](https://github.com/objectionary/phino):
 | `F o attr0 attr1 ...` | `formation()` | makes `o` a formation |
 | `D o base attr` | `dispatch()` | makes `o` the dispatch `base.attr` |
 | `A o proto attr arg` | `application()` | makes `o` the `proto( attr ↦ arg )` |
+| `T o` | `termination()` | makes `o` the termination `⊥` |
 | `P o attr kid` | `put()` | puts `kid` to the attribute `attr` of `o` |
 | `Δ o data` | `delta()` | sets the Δ-asset of `o` |
 | `λ o name` | `lambda()` | sets the λ-asset of `o` |

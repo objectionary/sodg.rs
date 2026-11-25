@@ -16,11 +16,12 @@ impl Script {
     /// by `phino sodg`.
     ///
     /// There must be one command per line: a letter and its arguments,
-    /// separated by spaces. There are six commands possible:
+    /// separated by spaces. There are seven commands possible:
     ///
     /// - `F o attr0 attr1 ...` calls [`Sodg::formation`],
     /// - `D o base attr` calls [`Sodg::dispatch`],
     /// - `A o proto attr arg` calls [`Sodg::application`],
+    /// - `T o` calls [`Sodg::termination`],
     /// - `P o attr kid` calls [`Sodg::put`],
     /// - `Δ o data` calls [`Sodg::delta`], with data in `XX-XX-...` format,
     /// - `λ o name` calls [`Sodg::lambda`].
@@ -111,6 +112,11 @@ impl Script {
                 let attr = Self::parse_label(args[2])?;
                 let arg = self.parse(args[3], g)?;
                 g.application(c, proto, attr, arg);
+            }
+            "T" => {
+                Self::arity(name, &args, 1)?;
+                let c = self.parse(args[0], g)?;
+                g.termination(c);
             }
             "P" => {
                 Self::arity(name, &args, 3)?;
@@ -327,6 +333,27 @@ P c0 foo c7
                 .unwrap()
         );
         assert_eq!(0x29, g.data(5).unwrap().to_i64().unwrap());
+    }
+
+    #[test]
+    fn deploys_termination() {
+        let mut g: Sodg<16> = Sodg::empty(256);
+        let total = Script::from_str("F c0 x\nT c1\nP c0 x c1")
+            .deploy_to(&mut g)
+            .unwrap();
+        assert_eq!(3, total);
+        assert_eq!(Kind::Termination, g.kind(1));
+        assert_eq!(1, g.kid(0, label("x")).unwrap());
+    }
+
+    #[test]
+    fn rejects_termination_with_extra_arguments() {
+        let mut g: Sodg<16> = Sodg::empty(256);
+        let err = Script::from_str("T c0 x").deploy_to(&mut g).unwrap_err();
+        assert!(
+            format!("{err:#}").contains("expects 1 arguments"),
+            "{err:#}"
+        );
     }
 
     #[test]
